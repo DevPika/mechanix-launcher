@@ -11,32 +11,50 @@ members = [
 ]
 
 [workspace.dependencies]
-# crates from the core
-app = { path = "../crates/app" }
-ui-macro = { path = "../crates/ui-macro" }
-renderer = { path = "../crates/renderer" }
-assets = { path = "../crates/assets" }
-io-ring = { path = "../crates/io-ring" }
-timer = { path = "../crates/timer" }
-wayland = { path = "../crates/wayland" }
-utils = { path = "../crates/utils" }
-ui = { path = "../crates/ui" }
-animation = { path = "../crates/animation" }
-interactivity = { path = "../crates/interactivity" }
-window-manager = { path = "../crates/window-manager" }
+# crates from the core (mecha-org/mecha-wayland)
+app            = { git = "https://github.com/mecha-org/mecha-wayland" }
+ui-macro       = { git = "https://github.com/mecha-org/mecha-wayland" }
+renderer       = { git = "https://github.com/mecha-org/mecha-wayland" }
+assets         = { git = "https://github.com/mecha-org/mecha-wayland" }
+io-ring        = { git = "https://github.com/mecha-org/mecha-wayland" }
+timer          = { git = "https://github.com/mecha-org/mecha-wayland" }
+wayland        = { git = "https://github.com/mecha-org/mecha-wayland" }
+utils          = { git = "https://github.com/mecha-org/mecha-wayland" }
+ui             = { git = "https://github.com/mecha-org/mecha-wayland" }
+animation      = { git = "https://github.com/mecha-org/mecha-wayland" }
+interactivity  = { git = "https://github.com/mecha-org/mecha-wayland" }
+window-manager = { git = "https://github.com/mecha-org/mecha-wayland" }
 
 # launcher sub-crates
-notification = { path = "notification" }
-launcher-counter = { path = "counter" }
-launcher-volume = { path = "volume" }
+notification       = { path = "notification" }
+launcher-counter   = { path = "counter" }
+launcher-volume    = { path = "volume" }
 launcher-status-bar = { path = "status-bar" }
-launcher-navbar = { path = "navbar" }
+launcher-navbar    = { path = "navbar" }
 launcher-pagination = { path = "pagination" }
 
 # third-party
 taffy = "0.10.1"
 libc = "0.2"
 anyhow = "1"
+
+# ---------------------------------------------------------------------------
+# Local development overrides — uncomment when working on core alongside launcher.
+# Assumes mecha-wayland is cloned as a sibling directory: ../mecha-wayland
+# ---------------------------------------------------------------------------
+[patch."https://github.com/mecha-org/mecha-wayland"]
+app            = { path = "../mecha-wayland/crates/app" }
+ui-macro       = { path = "../mecha-wayland/crates/ui-macro" }
+renderer       = { path = "../mecha-wayland/crates/renderer" }
+assets         = { path = "../mecha-wayland/crates/assets" }
+io-ring        = { path = "../mecha-wayland/crates/io-ring" }
+timer          = { path = "../mecha-wayland/crates/timer" }
+wayland        = { path = "../mecha-wayland/crates/wayland" }
+utils          = { path = "../mecha-wayland/crates/utils" }
+ui             = { path = "../mecha-wayland/crates/ui" }
+animation      = { path = "../mecha-wayland/crates/animation" }
+interactivity  = { path = "../mecha-wayland/crates/interactivity" }
+window-manager = { path = "../mecha-wayland/crates/window-manager" }
 
 [package]
 name = "launcher"
