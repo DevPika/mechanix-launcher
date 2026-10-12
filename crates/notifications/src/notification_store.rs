@@ -1,0 +1,17 @@
+use mecha_wayland::prelude::*;
+use std::time::SystemTime;
+
+use crate::notify::Notification;
+
+#[derive(Default)]
+pub struct NotificationStore {
+    pub entries: Vec<Entry>,
+}
+
+#[derive(Clone)]
+pub struct Entry {
+    pub app_id: u32,
+    pub received_time: SystemTime,
+    pub notification: Notification,
+}
+impl Resource for NotificationStore {}
