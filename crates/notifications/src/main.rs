@@ -3,15 +3,15 @@ use mecha_wayland::prelude::*;
 
 pub mod card;
 pub mod card_list;
-pub mod mock;
+pub mod dbus;
+pub mod dbus_spec;
 pub mod notification_store;
 pub mod notify;
 pub mod panel;
 pub mod style;
 
 use crate::{
-    card_list::notifications_changed, notification_store::NotificationStore,
-    notify::append_notifications, panel::PanelBuilder,
+    card_list::notifications_changed, dbus::{NotificationServer, on_call}, dbus_spec::register_notifications_interface, notification_store::NotificationStore, notify::append_notifications, panel::PanelBuilder,
 };
 
 fn main() {
@@ -24,6 +24,7 @@ fn main() {
         .add_module(MechanixTheme::dark())
         .insert_resource(Atlas::new());
     app.add_module(RingModule::default())
+        .add_module(DBusModule::new().session())
         .add_module(
             WaylandModule::new()
                 .bind::<WlCompositor>()
@@ -44,7 +45,12 @@ fn main() {
         ))
         .expect("Inter loads");
 
+    let export_id = register_notifications_interface(&mut app);
+
+    // this will register the id for the interface
+    app.insert_resource(NotificationServer { export_id });
     app.insert_resource(FontBook::new(font));
+    app.system(on_call);
 
     let root = app.root();
     app.spawn(root, PanelBuilder { root });
