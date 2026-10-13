@@ -11,7 +11,11 @@ pub mod panel;
 pub mod style;
 
 use crate::{
-    card_list::notifications_changed, dbus::{NotificationServer, on_call}, dbus_spec::register_notifications_interface, notification_store::NotificationStore, notify::append_notifications, panel::PanelBuilder,
+    card_list::notifications_changed,
+    dbus::{NotificationServer, on_call},
+    dbus_spec::register_notifications_interface,
+    notification_store::NotificationStore,
+    panel::PanelBuilder,
 };
 
 fn main() {
@@ -55,7 +59,6 @@ fn main() {
     let root = app.root();
     app.spawn(root, PanelBuilder { root });
     app.init_resource::<NotificationStore>();
-    app.system(append_notifications);
     app.system(notifications_changed);
     app.run();
 }

@@ -96,11 +96,14 @@ impl Widget for Card {
         );
 
         Card {
-            notification_id: b.entry.app_id,
+            notification_id: b.entry.id,
         }
     }
 }
 
+// TODO: It needs to update each minute
+// currently until a new notification arrives,
+// the card won't update the time
 fn ago(t: SystemTime) -> String {
     let secs = SystemTime::now()
         .duration_since(t)
