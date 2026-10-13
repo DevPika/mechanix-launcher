@@ -4,7 +4,10 @@ use mecha_wayland::{
 };
 use std::env;
 
-use crate::dbus_spec;
+use crate::{
+    dbus_spec,
+    notify::{Notify, NotifyArgs, append_notifications},
+};
 
 pub struct NotificationServer {
     pub export_id: ExportId,
@@ -21,6 +24,11 @@ pub fn on_call(app: &mut App, e: &MethodCallReceived) {
         "GetServerInformation" => {
             app.resource_mut::<DBus>().reply(&e.call, &capabilities());
             return;
+        }
+        "Notify" => {
+            let notify_args: Notify = e.call.args::<NotifyArgs>().unwrap().into();
+            let id = append_notifications(app, &notify_args);
+            app.resource_mut::<DBus>().reply(&e.call, &(id,));
         }
         _ => return,
     };
