@@ -1,6 +1,4 @@
 use crate::card_list::CardListBuilder;
-use crate::mock;
-use crate::notify::Notify;
 use crate::style::{color, size, space, text};
 use mecha_wayland::mechanix_widgets::{self as mw};
 use mecha_wayland::prelude::*;
@@ -42,18 +40,6 @@ impl Widget for Panel {
             (role,),
         );
         s.on::<CloseRequested>(win, |ctx, _| ctx.signal(Stop));
-
-        // This is Mock data
-        // should be handled whenever dbus gets merged
-        let mut mocks = mock::notifications().into_iter().cycle();
-        s.on::<Clicked>(win, move |ctx, _| {
-            if let Some(notification) = mocks.next() {
-                ctx.signal(Notify {
-                    replaces_id: None,
-                    notification,
-                });
-            }
-        });
 
         let header = s.spawn(
             win,
