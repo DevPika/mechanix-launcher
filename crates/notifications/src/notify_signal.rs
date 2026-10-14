@@ -1,4 +1,4 @@
-use crate::card::CardBuilder;
+use crate::card::{Card, CardBuilder, UpdateCard};
 use crate::card_list::CardList;
 use crate::notification_store::NotificationStore;
 use mecha_wayland::prelude::*;
@@ -27,7 +27,22 @@ pub fn notify_signal(app: &mut App, notify_signal: &NotificationSignal) {
             app.spawn(list, CardBuilder { entry });
         }
         NotificationSignal::UpdateNotification(id) => {
-            todo!()
+            let Some((card, _)) = app
+                .widgets::<Card>()
+                .find(|(_, card)| card.notification_id == *id)
+            else {
+                return;
+            };
+            let Some(entry) = app
+                .resource::<NotificationStore>()
+                .entries
+                .iter()
+                .find(|e| e.id == *id)
+                .cloned()
+            else {
+                return;
+            };
+            app.emit(UpdateCard(entry), card);
         }
         NotificationSignal::RemoveNotification(id) => {
             todo!()

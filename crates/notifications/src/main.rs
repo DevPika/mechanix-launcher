@@ -7,16 +7,16 @@ pub mod dbus;
 pub mod dbus_spec;
 pub mod notification_store;
 pub mod notify;
-pub mod panel;
 pub mod notify_signal;
+pub mod panel;
 pub mod style;
 
 use crate::{
     dbus::{NotificationServer, on_call},
     dbus_spec::register_notifications_interface,
     notification_store::NotificationStore,
-    panel::PanelBuilder,
     notify_signal::notify_signal,
+    panel::PanelBuilder,
 };
 
 fn main() {

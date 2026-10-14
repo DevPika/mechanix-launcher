@@ -1,3 +1,4 @@
+use mecha_wayland::mechanix_widgets::prelude::TextContextExt;
 use mecha_wayland::mechanix_widgets::{self as mw};
 use mecha_wayland::prelude::*;
 use std::time::SystemTime;
@@ -12,6 +13,9 @@ pub struct CardBuilder {
 pub struct Card {
     pub notification_id: u32,
 }
+
+pub struct UpdateCard(pub Entry);
+impl Event for UpdateCard {}
 
 impl Build for CardBuilder {
     type Widget = Card;
@@ -69,7 +73,7 @@ impl Widget for Card {
                     .gap(px(space::TITLE_TO_BODY.dp())),
             ),
         );
-        s.spawn(
+        let summary = s.spawn(
             title_row,
             mw::text(b.entry.notification.summary)
                 .variant(text::CARD_TITLE.variant)
@@ -79,14 +83,14 @@ impl Widget for Card {
                 .overflow(TextOverflow::Ellipsis),
         );
 
-        s.spawn(
+        let time = s.spawn(
             title_row,
             mw::text(ago(b.entry.received_time))
                 .variant(text::CARD_TIME.variant)
                 .color(text::CARD_TIME.color),
         );
 
-        s.spawn(
+        let body = s.spawn(
             column,
             mw::text(b.entry.notification.body)
                 .variant(text::CARD_BODY.variant)
@@ -94,6 +98,17 @@ impl Widget for Card {
                 .max_lines(1)
                 .overflow(TextOverflow::Ellipsis),
         );
+
+        s.on::<UpdateCard>(me, move |ctx, e| {
+            let entry = &e.0;
+            ctx.at(summary)
+                .unwrap()
+                .set_text(entry.notification.summary.clone());
+            ctx.at(body)
+                .unwrap()
+                .set_text(entry.notification.body.clone());
+            ctx.at(time).unwrap().set_text(ago(entry.received_time));
+        });
 
         Card {
             notification_id: b.entry.id,

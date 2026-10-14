@@ -1,6 +1,6 @@
 use crate::{
     notification_store::{Entry, NotificationStore},
-    notify_signal::NotificationSignal::AddNotification,
+    notify_signal::NotificationSignal::{AddNotification, UpdateNotification},
 };
 use mecha_wayland::prelude::*;
 use std::time::SystemTime;
@@ -82,20 +82,37 @@ impl From<NotifyArgs> for Notify {
 }
 
 pub fn append_notifications(app: &mut App, notify: &Notify) -> u32 {
-    let mut notifications_store = app.resource_mut::<NotificationStore>();
-    match notify.replaces_id {
-        Some(replaces_id) => 0,
-        None => {
-            notifications_store.next_id += 1;
-            let id = notifications_store.next_id;
-            let entry = Entry {
-                id,
-                received_time: SystemTime::now(),
-                notification: notify.notification.clone(),
-            };
-            notifications_store.entries.push(entry);
-            app.signal(AddNotification(id));
-            return id;
-        }
+    let replaced_notification = replace_notification(app, notify);
+    if let Some(id) = replaced_notification {
+        app.signal(UpdateNotification(id));
+        return id;
     }
+    let id = add_notification(app, notify);
+    app.signal(AddNotification(id));
+    id
+}
+
+fn replace_notification(app: &mut App, notify: &Notify) -> Option<u32> {
+    let mut notifications_store = app.resource_mut::<NotificationStore>();
+    notify.replaces_id.and_then(|replaces_id| {
+        let entry = notifications_store
+            .entries
+            .iter_mut()
+            .find(|entry| entry.id == replaces_id)?;
+        entry.notification = notify.notification.clone();
+        entry.received_time = SystemTime::now();
+        Some(replaces_id)
+    })
+}
+
+fn add_notification(app: &mut App, notify: &Notify) -> u32 {
+    let mut notifications_store = app.resource_mut::<NotificationStore>();
+    notifications_store.next_id += 1;
+    let id = notifications_store.next_id;
+    notifications_store.entries.push(Entry {
+        id,
+        received_time: SystemTime::now(),
+        notification: notify.notification.clone(),
+    });
+    id
 }
