@@ -1,4 +1,7 @@
-use crate::notification_store::{Entry, NotificationStore};
+use crate::{
+    notification_store::{Entry, NotificationStore},
+    notify_signal::NotificationSignal::AddNotification,
+};
 use mecha_wayland::prelude::*;
 use std::time::SystemTime;
 
@@ -80,13 +83,19 @@ impl From<NotifyArgs> for Notify {
 
 pub fn append_notifications(app: &mut App, notify: &Notify) -> u32 {
     let mut notifications_store = app.resource_mut::<NotificationStore>();
-    notifications_store.next_id += 1;
-    let id = notifications_store.next_id;
-    let entry = Entry {
-        id,
-        received_time: SystemTime::now(),
-        notification: notify.notification.clone(),
-    };
-    notifications_store.entries.push(entry);
-    return id;
+    match notify.replaces_id {
+        Some(replaces_id) => 0,
+        None => {
+            notifications_store.next_id += 1;
+            let id = notifications_store.next_id;
+            let entry = Entry {
+                id,
+                received_time: SystemTime::now(),
+                notification: notify.notification.clone(),
+            };
+            notifications_store.entries.push(entry);
+            app.signal(AddNotification(id));
+            return id;
+        }
+    }
 }

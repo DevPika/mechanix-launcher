@@ -8,14 +8,15 @@ pub mod dbus_spec;
 pub mod notification_store;
 pub mod notify;
 pub mod panel;
+pub mod notify_signal;
 pub mod style;
 
 use crate::{
-    card_list::notifications_changed,
     dbus::{NotificationServer, on_call},
     dbus_spec::register_notifications_interface,
     notification_store::NotificationStore,
     panel::PanelBuilder,
+    notify_signal::notify_signal,
 };
 
 fn main() {
@@ -54,11 +55,11 @@ fn main() {
     // this will register the id for the interface
     app.insert_resource(NotificationServer { export_id });
     app.insert_resource(FontBook::new(font));
+    app.system(notify_signal);
     app.system(on_call);
 
     let root = app.root();
     app.spawn(root, PanelBuilder { root });
     app.init_resource::<NotificationStore>();
-    app.system(notifications_changed);
     app.run();
 }
