@@ -7,6 +7,7 @@ pub enum NotificationSignal {
     AddNotification(u32),
     RemoveNotification(u32),
     UpdateNotification(u32),
+    CloseAllNotifications,
 }
 
 pub fn notify_signal(app: &mut App, notify_signal: &NotificationSignal) {
@@ -45,7 +46,29 @@ pub fn notify_signal(app: &mut App, notify_signal: &NotificationSignal) {
             app.emit(UpdateCard(entry), card);
         }
         NotificationSignal::RemoveNotification(id) => {
-            todo!()
+            app.resource_mut::<NotificationStore>()
+                .entries
+                .retain(|e| e.id != *id);
+            let Some((card, _)) = app
+                .widgets::<Card>()
+                .find(|(_, card)| card.notification_id == *id)
+            else {
+                return;
+            };
+            app.remove(card);
+        }
+        NotificationSignal::CloseAllNotifications => {
+            app.resource_mut::<NotificationStore>().entries.clear();
+            let Some((list, _)) = app.widgets::<CardList>().next() else {
+                return;
+            };
+            let cards = app
+                .children(list)
+                .map(<[NodeId]>::to_vec)
+                .unwrap_or_default();
+            for card in cards {
+                app.remove(card);
+            }
         }
     }
 }

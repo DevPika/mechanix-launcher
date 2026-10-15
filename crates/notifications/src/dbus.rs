@@ -7,6 +7,7 @@ use std::env;
 use crate::{
     dbus_spec,
     notify::{Notify, NotifyArgs, append_notifications},
+    notify_signal::NotificationSignal::RemoveNotification,
 };
 
 pub struct NotificationServer {
@@ -29,6 +30,12 @@ pub fn on_call(app: &mut App, e: &MethodCallReceived) {
             let notify_args: Notify = e.call.args::<NotifyArgs>().unwrap().into();
             let id = append_notifications(app, &notify_args);
             app.resource_mut::<DBus>().reply(&e.call, &(id,));
+        }
+        "CloseNotification" => {
+            let (id,) = e.call.args::<(u32,)>().unwrap();
+            app.signal(RemoveNotification(id));
+            // TODO: Return signal with reason
+            app.resource_mut::<DBus>().reply(&e.call, &());
         }
         _ => return,
     };

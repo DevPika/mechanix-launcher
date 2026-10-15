@@ -1,6 +1,7 @@
 use crate::card_list::CardListBuilder;
+use crate::notify_signal::NotificationSignal;
 use crate::style::{color, size, space, text};
-use mecha_wayland::mechanix_widgets::{self as mw};
+use mecha_wayland::mechanix_widgets::{self as mw, button};
 use mecha_wayland::prelude::*;
 
 pub struct Panel;
@@ -57,7 +58,10 @@ impl Widget for Panel {
                 .variant(text::SCREEN_TITLE.variant)
                 .color(text::SCREEN_TITLE.color),
         );
-
+        let close_all_notifications = s.spawn(header, button().label("close all"));
+        s.on::<Clicked>(close_all_notifications, move |ctx, _| {
+            ctx.signal(NotificationSignal::CloseAllNotifications)
+        });
         s.spawn(win, CardListBuilder);
 
         Panel

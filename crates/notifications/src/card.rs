@@ -1,9 +1,10 @@
 use mecha_wayland::mechanix_widgets::prelude::TextContextExt;
-use mecha_wayland::mechanix_widgets::{self as mw};
+use mecha_wayland::mechanix_widgets::{self as mw, button};
 use mecha_wayland::prelude::*;
 use std::time::SystemTime;
 
 use crate::notification_store::Entry;
+use crate::notify_signal::NotificationSignal::RemoveNotification;
 use crate::style::{color, shape, size, space, text};
 
 pub struct CardBuilder {
@@ -73,6 +74,11 @@ impl Widget for Card {
                     .gap(px(space::TITLE_TO_BODY.dp())),
             ),
         );
+        let close_btn = s.spawn(title_row, button().label("close"));
+        let id = b.entry.id;
+        s.on::<Clicked>(close_btn, move |ctx, _| {
+            close_notification(ctx, id);
+        });
         let summary = s.spawn(
             title_row,
             mw::text(b.entry.notification.summary)
@@ -130,4 +136,8 @@ fn ago(t: SystemTime) -> String {
         3_600..86_400 => format!("{} h", secs / 3_600),
         _ => format!("{} d", secs / 86_400),
     }
+}
+
+fn close_notification(ctx: &mut Context<Card>, id: u32) {
+    ctx.signal(RemoveNotification(id));
 }
