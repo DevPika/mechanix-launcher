@@ -5,13 +5,17 @@ use mecha_wayland::{
 use std::env;
 
 use crate::{
-    dbus_spec,
+    dbus_spec::{self, NOTIFICATIONS_CLOSED},
     notify::{Notify, NotifyArgs, append_notifications},
     notify_signal::NotificationSignal::RemoveNotification,
 };
 
 pub struct NotificationServer {
     pub export_id: ExportId,
+}
+
+pub enum DbusSignal {
+    NotificationClosed(u32, u32),
 }
 
 impl Resource for NotificationServer {}
@@ -33,8 +37,7 @@ pub fn on_call(app: &mut App, e: &MethodCallReceived) {
         }
         "CloseNotification" => {
             let (id,) = e.call.args::<(u32,)>().unwrap();
-            app.signal(RemoveNotification(id));
-            // TODO: Return signal with reason
+            app.signal(RemoveNotification(id, NOTIFICATIONS_CLOSED));
             app.resource_mut::<DBus>().reply(&e.call, &());
         }
         _ => return,
@@ -48,4 +51,17 @@ fn capabilities() -> (&'static str, &'static str, &'static str, &'static str) {
         env!("CARGO_PKG_VERSION"),
         dbus_spec::SPEC_VERSION,
     )
+}
+
+pub fn emit_signal(app: &mut App, signal: &DbusSignal) {
+    match signal {
+        DbusSignal::NotificationClosed(id, reason) => {
+            app.resource_mut::<DBus>().session().emit_signal(
+                dbus_spec::OBJECT,
+                dbus_spec::INTERFACE,
+                "NotificationClosed",
+                &(id, reason),
+            );
+        }
+    }
 }

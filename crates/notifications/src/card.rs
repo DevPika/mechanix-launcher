@@ -3,6 +3,7 @@ use mecha_wayland::mechanix_widgets::{self as mw, button};
 use mecha_wayland::prelude::*;
 use std::time::SystemTime;
 
+use crate::dbus_spec::NOTIFIFICATION_DISMISSED;
 use crate::notification_store::Entry;
 use crate::notify_signal::NotificationSignal::RemoveNotification;
 use crate::style::{color, shape, size, space, text};
@@ -139,5 +140,5 @@ fn ago(t: SystemTime) -> String {
 }
 
 fn close_notification(ctx: &mut Context<Card>, id: u32) {
-    ctx.signal(RemoveNotification(id));
+    ctx.signal(RemoveNotification(id, NOTIFIFICATION_DISMISSED));
 }

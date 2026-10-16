@@ -9,7 +9,7 @@ pub struct NotificationStore {
     pub next_id: u32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Entry {
     pub id: u32,
     pub received_time: SystemTime,

@@ -1,11 +1,14 @@
 use crate::card::{Card, CardBuilder, UpdateCard};
 use crate::card_list::CardList;
+use crate::dbus::{DbusSignal, emit_signal};
+use crate::dbus_spec::NOTIFIFICATION_DISMISSED;
 use crate::notification_store::NotificationStore;
 use mecha_wayland::prelude::*;
 
+// this is app wide signal, not the the dbus signal
 pub enum NotificationSignal {
     AddNotification(u32),
-    RemoveNotification(u32),
+    RemoveNotification(u32, u32),
     UpdateNotification(u32),
     CloseAllNotifications,
 }
@@ -45,7 +48,7 @@ pub fn notify_signal(app: &mut App, notify_signal: &NotificationSignal) {
             };
             app.emit(UpdateCard(entry), card);
         }
-        NotificationSignal::RemoveNotification(id) => {
+        NotificationSignal::RemoveNotification(id, reason) => {
             app.resource_mut::<NotificationStore>()
                 .entries
                 .retain(|e| e.id != *id);
@@ -56,9 +59,16 @@ pub fn notify_signal(app: &mut App, notify_signal: &NotificationSignal) {
                 return;
             };
             app.remove(card);
+            emit_signal(app, &DbusSignal::NotificationClosed(*id, *reason));
         }
         NotificationSignal::CloseAllNotifications => {
-            app.resource_mut::<NotificationStore>().entries.clear();
+            let removed_ids: Vec<u32> = app
+                .resource_mut::<NotificationStore>()
+                .entries
+                .drain(..)
+                .map(|x| x.id)
+                .collect();
+
             let Some((list, _)) = app.widgets::<CardList>().next() else {
                 return;
             };
@@ -68,6 +78,12 @@ pub fn notify_signal(app: &mut App, notify_signal: &NotificationSignal) {
                 .unwrap_or_default();
             for card in cards {
                 app.remove(card);
+            }
+            for id in removed_ids {
+                emit_signal(
+                    app,
+                    &DbusSignal::NotificationClosed(id, NOTIFIFICATION_DISMISSED),
+                );
             }
         }
     }
