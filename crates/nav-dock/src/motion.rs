@@ -58,6 +58,16 @@ pub(crate) fn targets(view: &View, config: &NavDockConfig, overlay: Size) -> Tar
     }
 }
 
+/// The largest absolute delta between the displayed row position
+/// `row_xy`, the displayed morph bottom `morph_bottom` and `targets`: how
+/// far the farthest edge has to travel.
+pub(crate) fn travel(targets: Targets, row_xy: (f32, f32), morph_bottom: f32) -> f32 {
+    (targets.row_left - row_xy.0)
+        .abs()
+        .max((targets.row_top - row_xy.1).abs())
+        .max((targets.morph_bottom - morph_bottom).abs())
+}
+
 /// Whether a held finger moves the row and the morph: any held contact
 /// but the bar's. A bar drag moves nothing with the finger, so its look
 /// change eases.
@@ -71,6 +81,7 @@ fn throw(
     view: &View,
     prev_release_seq: u64,
     axis: Option<Axis>,
+    distance: f32,
     config: &NavDockConfig,
 ) -> Option<LayoutAnimationSettings> {
     let r = view.release.filter(|r| r.seq != prev_release_seq)?;
@@ -78,7 +89,10 @@ fn throw(
         Axis::Horizontal => r.vx,
         Axis::Vertical => r.vy,
     };
-    let speed = throw_speed(v, config.min_throw_speed, config.throw_easing_slope);
+    // A slow release would take `3 * distance / v`: raise it so the
+    // farthest edge arrives within `max_throw_time`.
+    let speed = throw_speed(v, config.min_throw_speed, config.throw_easing_slope)
+        .max(distance / config.max_throw_time.as_secs_f32());
     Some(LayoutAnimationSettings::new(
         AnimationTime::Speed(speed),
         Easing::EaseOutCubic,
@@ -87,17 +101,19 @@ fn throw(
 
 /// How the row moves to its next targets: snapped while a finger drags
 /// it, thrown at the release speed when a new release ended a drag along
-/// `axis`, eased over `anim` otherwise.
+/// `axis` (at least fast enough to cover `distance` within
+/// `max_throw_time`), eased over `anim` otherwise.
 pub(crate) fn settings(
     view: &View,
     prev_release_seq: u64,
     axis: Option<Axis>,
+    distance: f32,
     config: &NavDockConfig,
 ) -> LayoutAnimationSettings {
     if coupled(view) {
         return eased_layout(Duration::ZERO);
     }
-    throw(view, prev_release_seq, axis, config).unwrap_or(eased_layout(config.anim))
+    throw(view, prev_release_seq, axis, distance, config).unwrap_or(eased_layout(config.anim))
 }
 
 /// How the morph moves to its next targets: as the row while a finger
@@ -107,10 +123,11 @@ pub(crate) fn morph_settings(
     view: &View,
     prev_release_seq: u64,
     axis: Option<Axis>,
+    distance: f32,
     config: &NavDockConfig,
 ) -> LayoutAnimationSettings {
     if view.exit.is_some() || coupled(view) {
-        return settings(view, prev_release_seq, axis, config);
+        return settings(view, prev_release_seq, axis, distance, config);
     }
     eased_layout(config.anim)
 }
@@ -276,6 +293,18 @@ mod tests {
     }
 
     #[test]
+    fn travel_is_the_largest_delta() {
+        let t = Targets {
+            row_left: -612.0,
+            row_top: 0.0,
+            morph_bottom: 26.0,
+        };
+        assert_eq!(travel(t, (0.0, 100.0), 26.0), 612.0);
+        assert_eq!(travel(t, (-612.0, 1324.0), -73.0), 1324.0);
+        assert_eq!(travel(t, (-612.0, 0.0), 26.0), 0.0);
+    }
+
+    #[test]
     fn glide_eases_from_to() {
         let anim = Duration::from_millis(200);
         assert_eq!(glide(0.0, -612.0, Duration::ZERO, anim), 0.0);
@@ -293,13 +322,13 @@ mod tests {
         let config = NavDockConfig::default();
         let zero = eased_layout(Duration::ZERO);
         let v = strip_drag(150.0);
-        same(settings(&v, 0, V, &config), zero);
-        same(morph_settings(&v, 0, V, &config), zero);
+        same(settings(&v, 0, V, 0.0, &config), zero);
+        same(morph_settings(&v, 0, V, 0.0, &config), zero);
         // A held drag snaps even with an unapplied release on record.
         let mut v = released(0.0, -3.0);
         v.held_surface = Some(Surface::Overlay);
-        same(settings(&v, 0, V, &config), zero);
-        same(morph_settings(&v, 0, V, &config), zero);
+        same(settings(&v, 0, V, 0.0, &config), zero);
+        same(morph_settings(&v, 0, V, 0.0, &config), zero);
     }
 
     #[test]
@@ -312,27 +341,46 @@ mod tests {
             ..view(Mode::Dragging { hover: 1 })
         };
         let anim = eased_layout(config.anim);
-        same(settings(&v, 0, None, &config), anim);
-        same(morph_settings(&v, 0, None, &config), anim);
+        same(settings(&v, 0, None, 0.0, &config), anim);
+        same(morph_settings(&v, 0, None, 0.0, &config), anim);
     }
 
     #[test]
     fn new_release_uses_throw_speed() {
         let config = NavDockConfig::default();
-        same(settings(&released(0.2, -3.0), 2, V, &config), throw(1000.0));
+        same(
+            settings(&released(0.2, -3.0), 2, V, 0.0, &config),
+            throw(1000.0),
+        );
+    }
+
+    #[test]
+    fn long_slow_throw_finishes_within_max_throw_time() {
+        let config = NavDockConfig::default();
+        let s = settings(&released(0.0, -0.01), 2, V, 2000.0, &config);
+        let want = 2000.0 / config.max_throw_time.as_secs_f32();
+        // 0.01 px/ms alone would give 1000 px/s: the cap raises it.
+        assert!(want > 1000.0);
+        same(s, throw(want));
     }
 
     #[test]
     fn page_switch_throws_along_x() {
         let config = NavDockConfig::default();
         let h = Some(Axis::Horizontal);
-        same(settings(&released(-6.0, 0.1), 2, h, &config), throw(2000.0));
+        same(
+            settings(&released(-6.0, 0.1), 2, h, 0.0, &config),
+            throw(2000.0),
+        );
     }
 
     #[test]
     fn slow_release_uses_min_throw_speed() {
         let config = NavDockConfig::default();
-        same(settings(&released(0.0, -0.01), 2, V, &config), throw(500.0));
+        same(
+            settings(&released(0.0, -0.01), 2, V, 0.0, &config),
+            throw(1000.0),
+        );
     }
 
     #[test]
@@ -340,8 +388,11 @@ mod tests {
         // A tap moved nothing: there is no throw to carry.
         let config = NavDockConfig::default();
         let anim = eased_layout(config.anim);
-        same(settings(&released(0.0, -3.0), 2, None, &config), anim);
-        same(morph_settings(&released(0.0, -3.0), 2, None, &config), anim);
+        same(settings(&released(0.0, -3.0), 2, None, 0.0, &config), anim);
+        same(
+            morph_settings(&released(0.0, -3.0), 2, None, 0.0, &config),
+            anim,
+        );
     }
 
     #[test]
@@ -350,23 +401,23 @@ mod tests {
         // A commit: the row is thrown, the morph's look change eases.
         let commit = released(0.0, -3.0);
         same(
-            morph_settings(&commit, 2, V, &config),
+            morph_settings(&commit, 2, V, 0.0, &config),
             eased_layout(config.anim),
         );
         let flick = View {
             exit: Some(Exit::Up),
             ..released(0.0, -3.0)
         };
-        same(morph_settings(&flick, 2, V, &config), throw(1000.0));
+        same(morph_settings(&flick, 2, V, 0.0, &config), throw(1000.0));
     }
 
     #[test]
     fn applied_release_eases_over_anim() {
         let config = NavDockConfig::default();
         let anim = eased_layout(config.anim);
-        same(settings(&released(0.0, -3.0), 3, V, &config), anim);
+        same(settings(&released(0.0, -3.0), 3, V, 0.0, &config), anim);
         same(
-            settings(&view(Mode::Idle { active: 0 }), 0, V, &config),
+            settings(&view(Mode::Idle { active: 0 }), 0, V, 0.0, &config),
             anim,
         );
     }

@@ -67,6 +67,7 @@ impl NavDock {
     fn motion_settings(
         &mut self,
         view: &View,
+        distance: f32,
     ) -> (LayoutAnimationSettings, LayoutAnimationSettings) {
         if let Some(surface) = view.held_surface {
             let (dx, dy) = view.overlay.map_or((0.0, 0.0), |o| (o.dx, o.dy));
@@ -79,8 +80,8 @@ impl NavDock {
         }
         let (seq, axis, config) = (self.applied_release, self.throw_axis, self.state.config());
         let settings = (
-            motion::settings(view, seq, axis, config),
-            motion::morph_settings(view, seq, axis, config),
+            motion::settings(view, seq, axis, distance, config),
+            motion::morph_settings(view, seq, axis, distance, config),
         );
         self.applied_release = view.release.map_or(self.applied_release, |r| r.seq);
         settings
@@ -154,7 +155,10 @@ pub(crate) fn reconcile(app: &mut App) {
     }
     app.resource_mut::<NavDock>().windows = set;
 
-    let (row, morph) = app.resource_mut::<NavDock>().motion_settings(&view);
+    let distance = travel_of(app, view, set.overlay);
+    let (row, morph) = app
+        .resource_mut::<NavDock>()
+        .motion_settings(&view, distance);
     push(app, view, row, morph);
     // A glide steps on frames, which an unmoved layout would not request.
     if let Some(overlay) = set
@@ -163,6 +167,29 @@ pub(crate) fn reconcile(app: &mut App) {
     {
         app.signal(RequestFrame(overlay));
     }
+}
+
+/// How far the overlay's row and morph have to travel from where they are
+/// displayed to the targets of `view`; zero without an overlay.
+fn travel_of(app: &App, view: View, overlay: Option<NodeId>) -> f32 {
+    let Some((row, morph)) = overlay
+        .and_then(|o| parts(app, o).map(|p| (o, p)))
+        .map(|(_, p)| p)
+    else {
+        return 0.0;
+    };
+    let nav = app.resource::<NavDock>();
+    let size = nav.overlay_size();
+    let targets = motion::targets(&view, nav.state.config(), size);
+    let (Some(row), Some(morph)) = (app.component::<Layout>(row), app.component::<Layout>(morph))
+    else {
+        return 0.0;
+    };
+    motion::travel(
+        targets,
+        (row.rect.x(), row.rect.y()),
+        size.height - morph.rect.bottom(),
+    )
 }
 
 /// Sends the overlay's row and morph their targets for `view`, reached

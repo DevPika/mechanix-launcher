@@ -41,6 +41,9 @@ pub struct NavDockConfig {
     pub reveal_full_px: f32,
     /// Floor on the speed of a throw animation, in px/s.
     pub min_throw_speed: f32,
+    /// Longest a throw may take: a slower release is sped up so the
+    /// farthest-travelling edge arrives within this time.
+    pub max_throw_time: Duration,
     /// Slope of the throw easing curve at t = 0 (3.0 for `EaseOutCubic`).
     pub throw_easing_slope: f32,
     /// Share of finger travel past the dock's rest height that it follows.
@@ -67,11 +70,12 @@ impl Default for NavDockConfig {
             dock_bottom_gap: 26.0,
             bar_size: (160.0, 12.0),
             bar_bottom_gap: 8.0,
-            anim: Duration::from_millis(280),
+            anim: Duration::from_millis(160),
             default_section: "recents",
             fallback_screen: (612.0, 1360.0),
             reveal_full_px: 300.0,
-            min_throw_speed: 1500.0,
+            min_throw_speed: 3000.0,
+            max_throw_time: Duration::from_millis(220),
             throw_easing_slope: 3.0,
             dock_rubber: 0.3,
         }
