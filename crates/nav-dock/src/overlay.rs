@@ -78,7 +78,8 @@ pub(crate) struct OverlayRow {
     cells: Vec<Handle<Div>>,
     size: Size,
     view: OverlayView,
-    dragging: bool,
+    /// The last update applied.
+    applied: Option<OverlayUpdate>,
     anim: Duration,
 }
 
@@ -100,21 +101,27 @@ impl Widget for OverlayRow {
         *s.component_mut::<LayoutStyle>(me).unwrap() = LayoutStyle::default().row().absolute();
 
         s.on::<OverlayUpdate>(me, |ctx, e| {
+            // Reconcile re-sends an unchanged position after every touch
+            // event; skip those so they cannot re-arm easing.
             let row = ctx.me();
+            if row.applied == Some(*e) {
+                return;
+            }
+            row.applied = Some(*e);
             row.view = e.view;
-            row.dragging = e.dragging;
-            apply(ctx);
+            apply(ctx, !e.dragging);
         });
+        // A size change never slides the pages; only paging animates.
         s.on::<Resized>(b.window, |ctx, r| {
             ctx.me().size = r.size;
-            apply(ctx);
+            apply(ctx, false);
         });
 
         OverlayRow {
             cells: Vec::new(),
             size: b.size,
             view: b.view,
-            dragging: false,
+            applied: None,
             anim: b.anim,
         }
     }
@@ -126,17 +133,12 @@ fn cell_style(size: Size) -> LayoutStyle {
         .shrink(0.0)
 }
 
-/// Writes the row's position, size and animation, and every cell's size.
-fn apply(ctx: &mut Context<'_, OverlayRow>) {
-    let (cells, size, view, dragging, anim) = {
+/// Writes the row's position, size and animation (eased when `animate`,
+/// snapped otherwise), and every cell's size.
+fn apply(ctx: &mut Context<'_, OverlayRow>, animate: bool) {
+    let (cells, size, view, anim) = {
         let row = ctx.me();
-        (
-            row.cells.clone(),
-            row.size,
-            row.view,
-            row.dragging,
-            row.anim,
-        )
+        (row.cells.clone(), row.size, row.view, row.anim)
     };
     let left = -(view.page as f32 * size.width) + view.dx;
     let mut style = ctx.style().clone();
@@ -144,11 +146,7 @@ fn apply(ctx: &mut Context<'_, OverlayRow>) {
     style.width = px(size.width * cells.len() as f32);
     style.height = px(size.height);
     ctx.set_style(style);
-    ctx.set_layout_animation(if dragging {
-        eased_layout(Duration::ZERO)
-    } else {
-        eased_layout(anim)
-    });
+    ctx.set_layout_animation(eased_layout(if animate { anim } else { Duration::ZERO }));
     for cell in cells {
         if let Some(mut cell) = ctx.at(cell) {
             cell.set_style(cell_style(size));

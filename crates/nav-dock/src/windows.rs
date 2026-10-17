@@ -162,12 +162,19 @@ fn emit_at_content<E: Event>(app: &mut App, window: NodeId, event: E) {
     }
 }
 
-/// The overlay's settled size is the screen as far as the dock is
-/// concerned; the state needs its width for icon centres and paging.
+/// The overlay's settled size feeds the state's screen (icon centres and
+/// paging). The overlay sits below the status bar, so it is shorter than the
+/// screen: the screen only grows, to the component-wise max of both.
 pub(crate) fn on_overlay_resized(app: &mut App, e: &Emitted<Resized>) {
     let overlay = app.resource::<NavDock>().windows.overlay;
     if overlay.is_some_and(|w| e.targets.contains(&w)) {
-        app.resource_mut::<NavDock>().state.set_screen(e.event.size);
+        let mut nav = app.resource_mut::<NavDock>();
+        let old = nav.state.screen();
+        let size = Size::new(
+            old.width.max(e.event.size.width),
+            old.height.max(e.event.size.height),
+        );
+        nav.state.set_screen(size);
     }
 }
 
@@ -393,28 +400,51 @@ mod tests {
     }
 
     #[test]
-    fn pages_follow_overlay_size_and_page() {
+    fn screen_falls_back_before_any_resize() {
+        let r = Rig::new();
+        assert_eq!(
+            r.app.resource::<NavDock>().state.screen(),
+            Size::new(612.0, 1360.0)
+        );
+    }
+
+    #[test]
+    fn first_overlay_uses_fallback_screen() {
+        let mut r = Rig::new();
+        r.reveal();
+        let row = r.content(r.set().overlay.unwrap());
+        let style = r.app.component::<LayoutStyle>(row).unwrap();
+        assert_eq!(style.inset.left, px(-2.0 * 612.0));
+        assert_eq!(style.width, px(5.0 * 612.0));
+    }
+
+    #[test]
+    fn pages_follow_overlay_size_and_snap() {
         let mut r = Rig::new();
         r.reveal();
         let overlay = r.set().overlay.unwrap();
         r.app.emit(
             Resized {
-                size: Size::new(612.0, 1324.0),
+                size: Size::new(700.0, 1324.0),
             },
             overlay,
         );
         r.app.tick();
         assert_eq!(
             r.app.resource::<NavDock>().state.screen(),
-            Size::new(612.0, 1324.0)
+            Size::new(700.0, 1360.0),
+            "the shorter overlay does not shrink the screen"
         );
         let row = r.content(overlay);
         let style = r.app.component::<LayoutStyle>(row).unwrap();
-        assert_eq!(style.inset.left, px(-2.0 * 612.0), "default page 2");
-        assert_eq!(style.width, px(5.0 * 612.0));
+        assert_eq!(style.inset.left, px(-2.0 * 700.0), "default page 2");
+        assert_eq!(style.width, px(5.0 * 700.0));
+        let shown = r.app.component::<Layout>(row).unwrap().rect;
+        let target = r.app.component::<ComputedLayout>(row).unwrap().rect;
+        assert_eq!(shown, target, "a resize snaps, it does not slide");
         let cell = r.app.children(row).unwrap()[0];
         let cell = r.app.component::<LayoutStyle>(cell).unwrap();
-        assert_eq!((cell.width, cell.height), (px(612.0), px(1324.0)));
+        assert_eq!((cell.width, cell.height), (px(700.0), px(1324.0)));
     }
 
     #[test]

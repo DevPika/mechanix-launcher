@@ -52,8 +52,9 @@ impl Module for NavDockModule {
                 .collect()
         };
         let ids: Vec<&str> = self.sections.iter().map(|s| s.id()).collect();
-        // The screen is unknown until the overlay's first `Resized`.
-        let state = NavState::new(self.config, &ids, Size::ZERO);
+        // The real screen is only known once a window reports `Resized`.
+        let (width, height) = self.config.fallback_screen;
+        let state = NavState::new(self.config, &ids, Size::new(width, height));
         app.insert_resource(NavDock {
             state,
             sections: self.sections,

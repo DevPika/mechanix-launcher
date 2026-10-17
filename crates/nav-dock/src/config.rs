@@ -29,6 +29,9 @@ pub struct NavDockConfig {
     pub anim: Duration,
     /// Section id hovered when the dock is revealed.
     pub default_section: &'static str,
+    /// Screen size, (width, height) in px, until a window's `Resized`
+    /// reports a real one.
+    pub fallback_screen: (f32, f32),
 }
 
 impl Default for NavDockConfig {
@@ -51,6 +54,7 @@ impl Default for NavDockConfig {
             bar_bottom_gap: 8.0,
             anim: Duration::from_millis(280),
             default_section: "recents",
+            fallback_screen: (612.0, 1360.0),
         }
     }
 }
