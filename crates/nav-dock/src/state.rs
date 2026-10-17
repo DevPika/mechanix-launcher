@@ -298,8 +298,10 @@ impl NavState {
             self.release = Some(Release { seq, vx, vy });
         }
         match (g.kind, self.mode) {
-            (Kind::Drag { .. }, Mode::Dragging { hover }) => {
-                self.mode = if vy < -self.config.flick_px_per_ms {
+            (Kind::Drag { from, .. }, Mode::Dragging { hover }) => {
+                // A swipe that started on home never flicks home.
+                let flick = from != Mode::Hidden && vy < -self.config.flick_px_per_ms;
+                self.mode = if flick {
                     self.exit = Some(Exit::Up);
                     self.last_page = hover;
                     Mode::Hidden
@@ -589,8 +591,32 @@ mod tests {
         assert!(r.s.view().strip);
     }
 
+    impl Rig {
+        /// From `Minimized`, a fast bar drag up at `x` and release.
+        fn bar_flick(&mut self, x: f32) {
+            self.down(Surface::Bar, x, BAR_Y, 1000);
+            let mut y = BAR_Y;
+            let mut t = 1000;
+            for _ in 0..10 {
+                y -= 12.0;
+                t += 8;
+                self.mv(x, y, t);
+            }
+            self.up(t + 4);
+        }
+    }
+
     #[test]
     fn flick_goes_home() {
+        let mut r = Rig::minimized(2);
+        r.bar_flick(306.0);
+        assert_eq!(r.mode(), Mode::Hidden);
+        assert_eq!(r.s.view().exit, Some(Exit::Up));
+        assert_eq!(r.s.view().overlay, None);
+    }
+
+    #[test]
+    fn fast_strip_release_commits_instead_of_home() {
         let mut r = Rig::new();
         r.reveal();
         let mut y = 1340.0;
@@ -601,8 +627,9 @@ mod tests {
             r.mv(330.0, y, t);
         }
         r.up(t + 4);
-        assert_eq!(r.mode(), Mode::Hidden);
-        assert_eq!(r.s.view().overlay, None);
+        let hover = r.s.default_index;
+        assert_eq!(r.mode(), Mode::Minimized { active: hover });
+        assert_eq!(r.s.view().exit, None);
     }
 
     #[test]
@@ -825,17 +852,9 @@ mod tests {
 
     #[test]
     fn flick_sets_exit_up_and_last_page() {
-        let mut r = Rig::new();
+        let mut r = Rig::minimized(2);
         let x = r.s.icon_center_x(2);
-        r.past_hold(x);
-        let mut y = 1290.0;
-        let mut t = 230;
-        for _ in 0..10 {
-            y -= 12.0;
-            t += 8;
-            r.mv(x, y, t);
-        }
-        r.up(t + 4);
+        r.bar_flick(x);
         let v = r.s.view();
         assert_eq!(v.exit, Some(Exit::Up));
         assert_eq!(v.last_page, 2);

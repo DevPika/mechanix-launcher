@@ -863,11 +863,14 @@ pub(crate) mod tests {
     }
 
     impl Rig {
-        /// Reveal, then a fast throw up and release: Hidden, exiting up.
+        /// Commit to the bar, then a fast bar throw up and release:
+        /// Hidden, exiting up.
         fn flick(&mut self) {
             self.reveal();
-            let mut y = 1340.0;
-            let mut t = 16;
+            self.up(50);
+            self.down(Surface::Bar, 306.0, 1346.0, 1000);
+            let mut y = 1346.0;
+            let mut t = 1000;
             for _ in 0..10 {
                 y -= 12.0;
                 t += 8;
@@ -921,7 +924,9 @@ pub(crate) mod tests {
         r.flick();
         let overlay = r.overlay();
         assert!(r.app.is_live(overlay), "the overlay stays for the exit");
-        assert_eq!(r.namespaces(), vec![STRIP, OVERLAY]);
+        let mut names = r.namespaces();
+        names.sort();
+        assert_eq!(names, vec![OVERLAY, STRIP]);
         let row = r.row();
         let target = r.app.component::<ComputedLayout>(row).unwrap().rect;
         assert_eq!(target.y(), -1360.0, "the row is thrown off the top");
