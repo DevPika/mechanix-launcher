@@ -7,6 +7,12 @@ edition = "2024"
 mecha-wayland.workspace = true
 status-bar.workspace = true
 home.workspace = true
+nav-dock.workspace = true
+favourites.workspace = true
+search.workspace = true
+recents.workspace = true
+notifications.workspace = true
+quick-settings.workspace = true
 
 [workspace]
 members = [
