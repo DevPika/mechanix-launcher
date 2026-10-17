@@ -1,6 +1,9 @@
 //! `DockMorph`: the one element that is the expanded dock (a pill of
 //! section icons) and the minimized bar (a black pill of dots), morphing
-//! between the two inside the overlay window.
+//! between the two inside the overlay window. Its look is a continuous
+//! `t`: 0 is the bar, 1 the dock, and a bar drag holds it in between.
+
+use std::time::Duration;
 
 use mecha_wayland::prelude::*;
 
@@ -40,12 +43,17 @@ impl Look {
         }
     }
 
+    /// The look's `t`: 1 expanded, 0 the bar.
+    pub(crate) fn t(self) -> f32 {
+        match self {
+            Look::Expanded => 1.0,
+            Look::Bar => 0.0,
+        }
+    }
+
     /// The pill's (width, height).
     fn size(self, config: &NavDockConfig) -> (f32, f32) {
-        match self {
-            Look::Expanded => config.dock_size,
-            Look::Bar => config.bar_size,
-        }
+        pill_size(config, self.t())
     }
 
     /// Empty overlay below the pill.
@@ -69,15 +77,19 @@ impl Look {
     }
 }
 
-/// Show `look`, emphasising section `focus` (keep the current ones when
-/// `None`), with the bottom edge `bottom` above an overlay of `overlay`
-/// size, reached under `settings`. Emitted at the morph node.
+/// Show the look `t` (0 the bar, 1 the dock), emphasising section `focus`
+/// (keep the current ones when `None`), with the bottom edge `bottom` above
+/// an overlay of `overlay` size, reached under `settings`; `snap` when a
+/// finger drives it, so its colours follow at once. Emitted at the morph
+/// node.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MorphUpdate {
-    pub look: Option<(Look, usize)>,
+    pub t: Option<f32>,
+    pub focus: Option<usize>,
     pub bottom: f32,
     pub overlay: Size,
     pub settings: LayoutAnimationSettings,
+    pub snap: bool,
 }
 impl Event for MorphUpdate {}
 
@@ -89,15 +101,16 @@ impl Event for ScaleIcons {}
 
 /// The dock/bar element: one equal-width slot per section, so icon `i` is
 /// centred where `NavState::icon_center_x(i)` expects it. Each slot holds
-/// the icon (in its emphasis box) and the dot; the look decides which of
-/// the two has size, so a change of look grows one and shrinks the other.
+/// the icon (in its emphasis box) and the dot; the look's `t` shares size
+/// between the two, so a change of look grows one and shrinks the other.
 pub(crate) struct DockMorph {
     /// Per slot: the emphasis box, the icon inside it, and the dot.
     cells: Vec<Cell>,
     /// The icons' natural side.
     icon_side: f32,
     config: NavDockConfig,
-    look: Look,
+    /// 0 the bar, 1 the dock.
+    t: f32,
     focus: usize,
     /// Height of the bottom edge above the overlay's.
     bottom: f32,
@@ -114,8 +127,8 @@ struct Cell {
 
 #[cfg(test)]
 impl DockMorph {
-    pub(crate) fn look(&self) -> (Look, usize) {
-        (self.look, self.focus)
+    pub(crate) fn look(&self) -> (f32, usize) {
+        (self.t, self.focus)
     }
 }
 
@@ -135,8 +148,9 @@ impl Widget for DockMorph {
     type Builder = DockMorphBuilder;
 
     fn build(b: DockMorphBuilder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-        *s.component_mut::<LayoutStyle>(me).unwrap() = pill_style(&b.config, b.look, b.bottom);
-        *s.component_mut::<Paint>(me).unwrap() = Paint::Quad(pill_quad(s, &b.config, b.look));
+        let t = b.look.t();
+        *s.component_mut::<LayoutStyle>(me).unwrap() = pill_style(&b.config, t, b.bottom);
+        *s.component_mut::<Paint>(me).unwrap() = Paint::Quad(pill_quad(s, &b.config, t));
         *s.component_mut::<LayoutAnimationSettings>(me).unwrap() = eased_layout(b.config.anim);
         *s.component_mut::<PaintAnimationSettings>(me).unwrap() = eased_paint(b.config.anim);
 
@@ -150,7 +164,7 @@ impl Widget for DockMorph {
             .iter()
             .enumerate()
             .map(|(i, &sprite)| {
-                let l = CellLook::of(s, b.look, i == b.focus, icon_side);
+                let l = CellLook::of(s, t, i == b.focus, icon_side);
                 let slot = s.spawn(
                     me,
                     div().style(
@@ -173,13 +187,22 @@ impl Widget for DockMorph {
             // Unchanged updates are skipped, so their settings cannot cut
             // short or re-arm a running transition.
             let morph = ctx.me();
-            let (look, focus) = e.look.unwrap_or((morph.look, morph.focus));
-            let next = (look, focus, e.bottom, Some(e.overlay));
-            if (morph.look, morph.focus, morph.bottom, morph.overlay) == next {
+            let t = e.t.unwrap_or(morph.t);
+            let focus = e.focus.unwrap_or(morph.focus);
+            let next = (t, focus, e.bottom, Some(e.overlay));
+            if (morph.t, morph.focus, morph.bottom, morph.overlay) == next {
                 return;
             }
-            (morph.look, morph.focus, morph.bottom, morph.overlay) = next;
+            (morph.t, morph.focus, morph.bottom, morph.overlay) = next;
             ctx.set_layout_animation(e.settings);
+            // A finger-driven update sets the interpolated colours at once;
+            // a timed one fades them over `anim`.
+            let paint = if e.snap {
+                Duration::ZERO
+            } else {
+                ctx.me().config.anim
+            };
+            ctx.set_paint_animation(eased_paint(paint));
             apply(ctx);
         });
         s.on_theme(me, apply);
@@ -189,7 +212,7 @@ impl Widget for DockMorph {
             cells,
             icon_side,
             config: b.config,
-            look: b.look,
+            t,
             focus: b.focus,
             bottom: b.bottom,
             overlay: None,
@@ -197,10 +220,31 @@ impl Widget for DockMorph {
     }
 }
 
-/// The pill's style for `look`: absolute in the overlay, horizontally
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+fn lerp_color(a: Color, b: Color, t: f32) -> Color {
+    Color {
+        r: lerp(a.r, b.r, t),
+        g: lerp(a.g, b.g, t),
+        b: lerp(a.b, b.b, t),
+        a: lerp(a.a, b.a, t),
+    }
+}
+
+/// The pill's (width, height) at look `t`: the bar's at 0, the dock's at 1.
+fn pill_size(config: &NavDockConfig, t: f32) -> (f32, f32) {
+    (
+        lerp(config.bar_size.0, config.dock_size.0, t),
+        lerp(config.bar_size.1, config.dock_size.1, t),
+    )
+}
+
+/// The pill's style at look `t`: absolute in the overlay, horizontally
 /// centred, its bottom edge `bottom` above the overlay's.
-fn pill_style(config: &NavDockConfig, look: Look, bottom: f32) -> LayoutStyle {
-    let (width, height) = look.size(config);
+fn pill_style(config: &NavDockConfig, t: f32, bottom: f32) -> LayoutStyle {
+    let (width, height) = pill_size(config, t);
     LayoutStyle::default()
         .row()
         .align_items(Align::Center)
@@ -210,36 +254,33 @@ fn pill_style(config: &NavDockConfig, look: Look, bottom: f32) -> LayoutStyle {
         .margin(Insets::new(px(0.0), px(0.0), px(0.0), px(-width / 2.0)))
 }
 
-fn pill_quad(theme: &impl ThemeReader, config: &NavDockConfig, look: Look) -> Quad {
-    let (_, height) = look.size(config);
-    let fill = match look {
-        Look::Expanded => theme
-            .color(ColorRole::SurfaceContainerHighest)
-            .with_alpha(PILL_ALPHA),
-        Look::Bar => Color::BLACK,
-    };
-    Quad::new(fill).radius(height / 2.0)
+fn pill_quad(theme: &impl ThemeReader, config: &NavDockConfig, t: f32) -> Quad {
+    let (_, height) = pill_size(config, t);
+    let dock = theme
+        .color(ColorRole::SurfaceContainerHighest)
+        .with_alpha(PILL_ALPHA);
+    Quad::new(lerp_color(Color::BLACK, dock, t)).radius(height / 2.0)
 }
 
 /// Writes the pill and every slot for the current look and focus.
 fn apply(ctx: &mut Context<'_, DockMorph>) {
-    let (cells, icon_side, config, look, focus, bottom) = {
+    let (cells, icon_side, config, t, focus, bottom) = {
         let m = ctx.me();
         (
             m.cells.clone(),
             m.icon_side,
             m.config.clone(),
-            m.look,
+            m.t,
             m.focus,
             m.bottom,
         )
     };
-    ctx.set_style(pill_style(&config, look, bottom));
-    let quad = pill_quad(ctx, &config, look);
+    ctx.set_style(pill_style(&config, t, bottom));
+    let quad = pill_quad(ctx, &config, t);
     ctx.set_paint(Paint::Quad(quad));
 
     for (i, cell) in cells.into_iter().enumerate() {
-        let l = CellLook::of(ctx, look, i == focus, icon_side);
+        let l = CellLook::of(ctx, t, i == focus, icon_side);
         if let Some(mut hl) = ctx.at(cell.hl) {
             hl.set_style(l.hl_style);
             hl.set_paint(Paint::Quad(l.hl_quad));
@@ -272,8 +313,9 @@ fn scale_icons(ctx: &mut Context<'_, DockMorph>) {
     }
 }
 
-/// One slot in one look. Expanded: the icon box and icon at size, the dot
-/// at 0. Bar: the other way round. Sprite paint cannot fade, so icons go
+/// One slot at look `t`. At 1 (expanded): the icon box and icon at size,
+/// the dot at 0. At 0 (the bar): the other way round; in between, both
+/// scale linearly. Sprite paint cannot fade, so icons go
 /// and dots come through their layout size; an icon's sprite follows its
 /// displayed box through `ScaleIcons`, since a sprite draws at its own
 /// size whatever its box.
@@ -287,15 +329,10 @@ struct CellLook {
 }
 
 impl CellLook {
-    fn of(theme: &impl ThemeReader, look: Look, emphasised: bool, icon_side: f32) -> Self {
+    fn of(theme: &impl ThemeReader, t: f32, emphasised: bool, icon_side: f32) -> Self {
         let mut icon = IconLook::of(theme, emphasised);
-        let (icon_side, dot_side) = match look {
-            Look::Expanded => (icon_side, 0.0),
-            Look::Bar => {
-                icon.side = 0.0;
-                (0.0, DOT)
-            }
-        };
+        icon.side *= t;
+        let (icon_side, dot_side) = (icon_side * t, DOT * (1.0 - t));
         Self {
             hl_style: icon.box_style(),
             hl_quad: icon.box_quad(),
@@ -353,4 +390,19 @@ fn dot_quad(theme: &impl ThemeReader, active: bool) -> Quad {
         ColorRole::OnSurfaceVariant
     };
     Quad::new(theme.color(role)).radius(DOT / 2.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn halfway_morph_is_halfway_wide() {
+        let config = NavDockConfig::default();
+        let (width, height) = pill_size(&config, 0.5);
+        assert_eq!(width, (config.bar_size.0 + config.dock_size.0) / 2.0);
+        assert_eq!(height, (config.bar_size.1 + config.dock_size.1) / 2.0);
+        assert_eq!(pill_size(&config, 0.0), config.bar_size);
+        assert_eq!(pill_size(&config, 1.0), config.dock_size);
+    }
 }

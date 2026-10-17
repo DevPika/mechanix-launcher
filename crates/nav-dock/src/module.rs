@@ -66,6 +66,7 @@ impl Module for NavDockModule {
             pressed: Vec::new(),
             applied_release: 0,
             throw_axis: None,
+            lifted: false,
         });
         app.system(on_resized).system(on_contact).system(on_frame);
         reconcile(app);

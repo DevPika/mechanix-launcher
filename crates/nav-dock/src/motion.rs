@@ -7,10 +7,11 @@
 
 use std::time::Duration;
 
-use gestures::{throw_speed, Axis};
+use gestures::{Axis, throw_speed};
 use mecha_wayland::prelude::*;
 
 use crate::config::NavDockConfig;
+use crate::dock::Look;
 use crate::state::{Exit, Mode, Surface, View};
 use crate::windows::eased_layout;
 
@@ -35,10 +36,12 @@ pub(crate) fn targets(view: &View, config: &NavDockConfig, overlay: Size) -> Tar
         .overlay
         .map_or((view.last_page, 0.0, 0.0), |o| (o.page, o.dx, o.dy));
     let (row_top, morph_bottom) = match (view.mode, view.reveal_travel) {
-        // A bar drag lifts the open page 1:1; the dock looks as usual.
-        (Mode::Dragging { .. }, None) if view.lift.is_some() => {
-            (px(-view.lift.unwrap_or(0.0)), config.dock_bottom_gap)
-        }
+        // A bar drag grows the bar into the dock under the finger; the
+        // page stays put.
+        (Mode::Dragging { .. }, None) if view.lift.is_some() => (
+            percent(0.0),
+            lifted_bottom(view.lift.unwrap_or(0.0), config),
+        ),
         (Mode::Hidden, _) => match view.exit {
             Some(Exit::Up) => (percent(-100.0), height),
             // Below the edge in either look: the pill may still be expanded.
@@ -57,18 +60,37 @@ pub(crate) fn targets(view: &View, config: &NavDockConfig, overlay: Size) -> Tar
         (Mode::Idle { .. }, None) => (rest_or_px(0.0, height, dy), config.dock_bottom_gap - dy),
         (Mode::Minimized { .. }, None) => (rest_or_px(0.0, height, dy), config.bar_bottom_gap - dy),
     };
-    // While lifting, the row stays on the page the drag started on: its
-    // top is finger-coupled, so its left cannot ease to a new hover page.
-    let page = if view.lift.is_some() && view.mode != Mode::Hidden {
-        view.lift_page
-    } else {
-        page
-    };
     Targets {
         row_left: rest_or_px(-100.0 * page as f32, width, dx),
         row_top,
         morph_bottom,
     }
+}
+
+/// The extra height between the bar's and the dock's resting tops: the
+/// lift over which a bar drag grows the bar into the dock.
+fn lift_rest(config: &NavDockConfig) -> f32 {
+    config.dock_size.1 + config.dock_bottom_gap - (config.bar_size.1 + config.bar_bottom_gap)
+}
+
+/// The morph's bottom `lift` px into a bar drag: its top follows the finger
+/// 1:1 up to the dock's rest, then resists as a strip drag's does.
+fn lifted_bottom(lift: f32, config: &NavDockConfig) -> f32 {
+    let rest = lift_rest(config);
+    let t = (lift / rest).clamp(0.0, 1.0);
+    config.bar_bottom_gap
+        + t * (config.dock_bottom_gap - config.bar_bottom_gap)
+        + (lift - rest).max(0.0) * config.dock_rubber
+}
+
+/// The morph's look for `view`, from 0 (the bar) to 1 (the dock): the
+/// lift's share of `lift_rest` during a bar drag, the mode's look
+/// otherwise. `None` while Hidden: the morph keeps the look it has.
+pub(crate) fn morph_t(view: &View, config: &NavDockConfig) -> Option<f32> {
+    if let Some(lift) = view.lift {
+        return Some((lift / lift_rest(config)).clamp(0.0, 1.0));
+    }
+    Look::of(view.mode).map(|(look, _)| look.t())
 }
 
 /// `rest` percent of a window side of `extent` px, moved by the finger's
@@ -105,17 +127,22 @@ pub(crate) fn travel(
         .max((targets.morph_bottom - morph_bottom).abs())
 }
 
-/// Whether a held finger moves the morph (and, but for the strip's, the row): any held contact
-/// but the bar's. A bar drag moves nothing with the finger, so its look
-/// change eases.
+/// Whether a held finger moves the morph (and, but for the strip's, the
+/// row): any held contact but the bar's, whose tap moves nothing.
 pub(crate) fn coupled(view: &View) -> bool {
     view.held_surface.is_some_and(|s| s != Surface::Bar)
+}
+
+/// Whether a held finger drives the morph: a coupled contact, or a bar
+/// drag, whose lift grows the bar into the dock.
+pub(crate) fn morph_coupled(view: &View) -> bool {
+    coupled(view) || view.lift.is_some()
 }
 
 /// Whether a held finger moves the row: a coupled contact but the strip's,
 /// whose row slides up on its own while only the dock follows the finger.
 pub(crate) fn row_coupled(view: &View) -> bool {
-    view.lift.is_some() || (coupled(view) && view.held_surface != Some(Surface::Strip))
+    coupled(view) && view.held_surface != Some(Surface::Strip)
 }
 
 /// The throw for `view.release` when it is newer than `prev_release_seq`
@@ -159,8 +186,9 @@ pub(crate) fn settings(
     throw(view, prev_release_seq, axis, distance, config).unwrap_or(eased_layout(config.anim))
 }
 
-/// How the morph moves to its next targets: as the row while a finger
-/// drags it and when it is thrown off screen, otherwise eased over `anim`,
+/// How the morph moves to its next targets: snapped while a finger drives
+/// it, thrown as the row when it is thrown off screen or when the release
+/// ended a bar drag (`lifted`) that drove it, otherwise eased over `anim`,
 /// since its look change (commit, tap) is not the finger's.
 pub(crate) fn morph_settings(
     view: &View,
@@ -168,12 +196,14 @@ pub(crate) fn morph_settings(
     axis: Option<Axis>,
     distance: f32,
     config: &NavDockConfig,
+    lifted: bool,
 ) -> LayoutAnimationSettings {
-    if coupled(view) {
+    if morph_coupled(view) {
         return eased_layout(Duration::ZERO);
     }
-    if view.exit.is_some() {
-        return settings(view, prev_release_seq, axis, distance, config);
+    if view.exit.is_some() || lifted {
+        return throw(view, prev_release_seq, axis, distance, config)
+            .unwrap_or(eased_layout(config.anim));
     }
     eased_layout(config.anim)
 }
@@ -203,7 +233,6 @@ mod tests {
             held_surface: None,
             reveal_travel: None,
             lift: None,
-            lift_page: 0,
             release: None,
             exit: None,
             last_page: 0,
@@ -238,24 +267,73 @@ mod tests {
         }
     }
 
-    #[test]
-    fn lift_raises_the_row_one_to_one() {
-        let config = NavDockConfig::default();
-        let v = View {
+    fn bar_drag(lift: f32) -> View {
+        View {
             held_surface: Some(Surface::Bar),
-            lift: Some(200.0),
-            lift_page: 1,
-            ..view(Mode::Dragging { hover: 3 })
-        };
+            lift: Some(lift),
+            ..view(Mode::Dragging { hover: 1 })
+        }
+    }
+
+    /// The extra height between the bar's and the dock's rest tops.
+    fn rest(config: &NavDockConfig) -> f32 {
+        config.dock_size.1 + config.dock_bottom_gap - (config.bar_size.1 + config.bar_bottom_gap)
+    }
+
+    #[test]
+    fn bar_drag_does_not_move_the_page() {
+        let config = NavDockConfig::default();
+        let v = bar_drag(200.0);
         let t = at(v);
-        assert_eq!(t.row_top, px(-200.0));
-        assert_eq!(t.row_left, percent(-100.0), "stays on the start page");
-        same(
-            settings(&v, 0, V, 0.0, &config),
-            eased_layout(Duration::ZERO),
+        assert_eq!(t.row_top, percent(0.0));
+        assert_eq!(t.row_left, percent(-100.0), "on the current page");
+        same(settings(&v, 0, V, 0.0, &config), eased_layout(config.anim));
+    }
+
+    #[test]
+    fn bar_drag_morph_follows_lift() {
+        let config = NavDockConfig::default();
+        let v = bar_drag(rest(&config) / 2.0);
+        assert_eq!(morph_t(&v, &config), Some(0.5));
+        let halfway = (config.bar_bottom_gap + config.dock_bottom_gap) / 2.0;
+        assert!(
+            (at(v).morph_bottom - halfway).abs() < 1e-3,
+            "{}",
+            at(v).morph_bottom
         );
         same(
-            morph_settings(&v, 0, V, 0.0, &config),
+            morph_settings(&v, 0, V, 0.0, &config, false),
+            eased_layout(Duration::ZERO),
+        );
+        assert_eq!(morph_t(&bar_drag(0.0), &config), Some(0.0));
+        assert_eq!(at(bar_drag(0.0)).morph_bottom, config.bar_bottom_gap);
+    }
+
+    #[test]
+    fn bar_drag_morph_resists_past_rest() {
+        let config = NavDockConfig::default();
+        let v = bar_drag(rest(&config) + 100.0);
+        assert_eq!(morph_t(&v, &config), Some(1.0));
+        let want = config.dock_bottom_gap + 100.0 * config.dock_rubber;
+        assert!(
+            (at(v).morph_bottom - want).abs() < 1e-3,
+            "{}",
+            at(v).morph_bottom
+        );
+    }
+
+    #[test]
+    fn bar_drag_commit_throws_morph_back_to_bar() {
+        let config = NavDockConfig::default();
+        let v = released(0.0, -0.5);
+        assert_eq!(morph_t(&v, &config), Some(0.0));
+        assert_eq!(at(v).morph_bottom, config.bar_bottom_gap);
+        let s = morph_settings(&v, 2, V, 0.0, &config, true);
+        same(s, settings(&v, 2, V, 0.0, &config));
+        assert!(format!("{s:?}").contains("Speed("), "{s:?}");
+        // A release that did not lift the morph still eases.
+        same(
+            morph_settings(&v, 2, V, 0.0, &config, false),
             eased_layout(config.anim),
         );
     }
@@ -285,7 +363,7 @@ mod tests {
         assert_eq!(at(v).morph_bottom, -23.0, "the dock follows travel");
         same(settings(&v, 0, V, 0.0, &config), eased_layout(config.anim));
         same(
-            morph_settings(&v, 0, V, 0.0, &config),
+            morph_settings(&v, 0, V, 0.0, &config, false),
             eased_layout(Duration::ZERO),
         );
     }
@@ -405,18 +483,18 @@ mod tests {
         let config = NavDockConfig::default();
         let zero = eased_layout(Duration::ZERO);
         let v = strip_drag(150.0);
-        same(morph_settings(&v, 0, V, 0.0, &config), zero);
+        same(morph_settings(&v, 0, V, 0.0, &config, false), zero);
         // A held drag snaps even with an unapplied release on record.
         let mut v = released(0.0, -3.0);
         v.held_surface = Some(Surface::Overlay);
         same(settings(&v, 0, V, 0.0, &config), zero);
-        same(morph_settings(&v, 0, V, 0.0, &config), zero);
+        same(morph_settings(&v, 0, V, 0.0, &config, false), zero);
     }
 
     #[test]
     fn bar_drag_eases_over_anim() {
-        // The bar drag moves nothing with the finger: the morph opens over
-        // `anim` while the hover follows.
+        // A bar contact without lift (a tap) moves nothing with the finger:
+        // the morph opens over `anim`.
         let config = NavDockConfig::default();
         let v = View {
             held_surface: Some(Surface::Bar),
@@ -424,7 +502,7 @@ mod tests {
         };
         let anim = eased_layout(config.anim);
         same(settings(&v, 0, None, 0.0, &config), anim);
-        same(morph_settings(&v, 0, None, 0.0, &config), anim);
+        same(morph_settings(&v, 0, None, 0.0, &config, false), anim);
     }
 
     #[test]
@@ -472,7 +550,7 @@ mod tests {
         let anim = eased_layout(config.anim);
         same(settings(&released(0.0, -3.0), 2, None, 0.0, &config), anim);
         same(
-            morph_settings(&released(0.0, -3.0), 2, None, 0.0, &config),
+            morph_settings(&released(0.0, -3.0), 2, None, 0.0, &config, false),
             anim,
         );
     }
@@ -483,14 +561,17 @@ mod tests {
         // A commit: the row is thrown, the morph's look change eases.
         let commit = released(0.0, -3.0);
         same(
-            morph_settings(&commit, 2, V, 0.0, &config),
+            morph_settings(&commit, 2, V, 0.0, &config, false),
             eased_layout(config.anim),
         );
         let flick = View {
             exit: Some(Exit::Up),
             ..released(0.0, -3.0)
         };
-        same(morph_settings(&flick, 2, V, 0.0, &config), throw(1000.0));
+        same(
+            morph_settings(&flick, 2, V, 0.0, &config, false),
+            throw(1000.0),
+        );
     }
 
     #[test]

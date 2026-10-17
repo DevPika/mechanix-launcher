@@ -16,7 +16,7 @@ use nav_dock_api::Section;
 
 use crate::dock::{Look, MorphUpdate, ScaleIcons};
 use crate::motion;
-use crate::overlay::{parts, spawn_overlay, OverlayUpdate};
+use crate::overlay::{OverlayUpdate, parts, spawn_overlay};
 use crate::state::{Mode, NavState, Surface, View};
 use crate::strip::spawn_strip;
 
@@ -37,6 +37,9 @@ pub(crate) struct NavDock {
     /// The axis the last held contact dragged the row or morph along, for
     /// its release's throw; `None` when it moved nothing.
     pub(crate) throw_axis: Option<Axis>,
+    /// The last held contact was a bar drag driving the morph, so its
+    /// release throws the morph too.
+    pub(crate) lifted: bool,
     /// An overlay spawned at its hidden position whose first layout has not
     /// resolved yet. The framework snaps a node's first layout, so the real
     /// targets are only pushed once it has, and the page slides in.
@@ -85,11 +88,12 @@ impl NavDock {
                 Surface::Bar if view.lift.is_some() => Some(Axis::Vertical),
                 Surface::Overlay | Surface::Bar | Surface::Dock => None,
             };
+            self.lifted = view.lift.is_some();
         }
         let (seq, axis, config) = (self.applied_release, self.throw_axis, self.state.config());
         let settings = (
             motion::settings(view, seq, axis, distance, config),
-            motion::morph_settings(view, seq, axis, distance, config),
+            motion::morph_settings(view, seq, axis, distance, config, self.lifted),
         );
         self.applied_release = view.release.map_or(self.applied_release, |r| r.seq);
         settings
@@ -218,11 +222,16 @@ fn push(
     row_settings: LayoutAnimationSettings,
     morph_settings: LayoutAnimationSettings,
 ) {
-    let (overlay, size, targets) = {
+    let (overlay, size, targets, config) = {
         let nav = app.resource::<NavDock>();
         let size = nav.overlay_size();
         let targets = motion::targets(&view, nav.state.config(), nav.laid_out_size(app));
-        (nav.windows.overlay, size, targets)
+        (
+            nav.windows.overlay,
+            size,
+            targets,
+            nav.state.config().clone(),
+        )
     };
     let Some((row, morph)) = overlay.and_then(|o| parts(app, o)) else {
         return;
@@ -235,10 +244,12 @@ fn push(
     };
     app.emit(update, row);
     let update = MorphUpdate {
-        look: Look::of(view.mode),
+        t: motion::morph_t(&view, &config),
+        focus: Look::of(view.mode).map(|(_, focus)| focus),
         bottom: targets.morph_bottom,
         overlay: size,
         settings: morph_settings,
+        snap: motion::morph_coupled(&view),
     };
     app.emit(update, morph);
 }
@@ -672,10 +683,12 @@ pub(crate) mod tests {
         r.down(Surface::Bar, 306.0, 1346.0, 1000);
         r.mv(400.0, 1346.0, 1016);
         assert_eq!((r.overlay(), r.morph()), (overlay, morph));
+        assert_eq!(r.morph_width(), config.bar_size.0, "not lifted yet");
+        r.mv(400.0, 1146.0, 1100);
         assert_eq!(
             r.morph_width(),
             config.dock_size.0,
-            "expanded while dragging"
+            "expanded once lifted past rest"
         );
         r.up(1200);
         assert_eq!((r.overlay(), r.morph()), (overlay, morph));
@@ -1112,43 +1125,56 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bar_flick_throws_the_lifted_page_off_the_top() {
-        let mut r = Rig::new();
-        r.bar_lift(true);
-        let view = r.app.resource::<NavDock>().state.view();
-        assert_eq!(view.exit, Some(crate::state::Exit::Up));
-        let target = r.app.component::<ComputedLayout>(r.row()).unwrap().rect;
-        let height = r.app.resource::<NavDock>().laid_out_size(&r.app).height;
-        assert_eq!(target.y(), -height);
-        let row = r.settings_of(r.row());
-        assert!(row.contains("Speed("), "thrown: {row}");
-        let speed: f32 = row
-            .split("Speed(")
-            .nth(1)
-            .unwrap()
-            .split(')')
-            .next()
-            .unwrap()
-            .parse()
-            .unwrap();
+    fn bar_drag_commit_throws_morph_back_to_bar() {
         let config = NavDockConfig::default();
-        let distance = height - 300.0;
-        assert!(
-            speed >= distance / config.max_throw_time.as_secs_f32() - 1e-3,
-            "{speed}"
-        );
-    }
-
-    #[test]
-    fn bar_drag_release_without_flick_settles_page_back() {
         let mut r = Rig::new();
         r.bar_lift(false);
         let view = r.app.resource::<NavDock>().state.view();
         assert_eq!(view.exit, None);
-        let target = r.app.component::<ComputedLayout>(r.row()).unwrap().rect;
-        assert_eq!(target.y(), 0.0);
+        assert_eq!(r.morph_widget().look(), (0.0, 2));
+        let size = r.app.resource::<NavDock>().laid_out_size(&r.app);
+        let target = r.app.component::<ComputedLayout>(r.morph()).unwrap().rect;
+        assert_eq!(target, Look::Bar.target_rect(&config, size));
+        let morph = r.settings_of(r.morph());
+        assert!(morph.contains("Speed("), "thrown: {morph}");
+        let row = r.app.component::<ComputedLayout>(r.row()).unwrap().rect;
+        assert_eq!(row.y(), 0.0, "the page stays put");
+    }
+
+    #[test]
+    fn bar_drag_moves_the_morph_not_the_page() {
+        let mut r = Rig::new();
+        r.reveal();
+        r.up(50);
+        r.down(Surface::Bar, 306.0, 1346.0, 1000);
+        r.mv(306.0, 1306.0, 1200);
+        let row = r.app.component::<ComputedLayout>(r.row()).unwrap().rect;
+        assert_eq!(row.y(), 0.0, "the page stays put");
+        let zero = format!("{:?}", eased_layout(Duration::ZERO));
+        assert_eq!(r.settings_of(r.morph()), zero);
+        let morph = r.morph();
+        let shown = r.app.component::<Layout>(morph).unwrap().rect;
+        let target = r.app.component::<ComputedLayout>(morph).unwrap().rect;
+        assert_eq!(shown, target, "the bar follows the finger exactly");
+        let (t, _) = r.morph_widget().look();
+        assert!(t > 0.0 && t < 1.0, "part way to the dock: {t}");
+    }
+
+    #[test]
+    fn bar_flick_throws_morph_off_top() {
+        let mut r = Rig::new();
+        r.bar_lift(true);
+        let view = r.app.resource::<NavDock>().state.view();
+        assert_eq!(view.exit, Some(crate::state::Exit::Up));
+        let target = r.app.component::<ComputedLayout>(r.morph()).unwrap().rect;
+        assert!(target.bottom() <= 0.0, "off the top: {target:?}");
+        let morph = r.settings_of(r.morph());
+        assert!(morph.contains("Speed("), "thrown: {morph}");
         let row = r.settings_of(r.row());
         assert!(row.contains("Speed("), "thrown: {row}");
+        let height = r.app.resource::<NavDock>().laid_out_size(&r.app).height;
+        let row = r.app.component::<ComputedLayout>(r.row()).unwrap().rect;
+        assert_eq!(row.y(), -height, "the row exits as ever");
     }
 
     #[test]
@@ -1173,8 +1199,8 @@ pub(crate) mod tests {
     fn morph_shows_hover_and_active() {
         let mut r = Rig::new();
         r.reveal();
-        assert_eq!(r.morph_widget().look(), (Look::Expanded, 2));
+        assert_eq!(r.morph_widget().look(), (1.0, 2));
         r.up(50);
-        assert_eq!(r.morph_widget().look(), (Look::Bar, 2));
+        assert_eq!(r.morph_widget().look(), (0.0, 2));
     }
 }

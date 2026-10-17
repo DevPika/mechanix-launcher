@@ -3,7 +3,7 @@
 
 use std::time::Instant;
 
-use gestures::{snap_page, Axis, AxisLock, VelocityTracker};
+use gestures::{Axis, AxisLock, VelocityTracker, snap_page};
 use mecha_wayland::prelude::{Point, Size};
 
 use crate::config::NavDockConfig;
@@ -59,10 +59,8 @@ pub struct View {
     /// is held; `None` otherwise, bar drags included.
     pub reveal_travel: Option<f32>,
     /// Upward travel since Down (>= 0) while a drag that began on the bar is
-    /// held; `None` otherwise.
+    /// held; `None` otherwise. It drives the morph, not the page.
     pub lift: Option<f32>,
-    /// The page the bar drag started on, valid while `lift` is Some.
-    pub lift_page: usize,
     /// The most recent release of a gesture.
     pub release: Option<Release>,
     /// How the overlay left, set when the mode becomes Hidden and cleared by
@@ -181,16 +179,16 @@ impl NavState {
             .gesture
             .as_ref()
             .map_or((0.0, 0.0), Gesture::overlay_offset);
-        let (lift, lift_page) = match self.gesture.as_ref() {
-            Some(g) => match g.kind {
+        let lift = self.gesture.as_ref().and_then(|g| {
+            let from_bar = matches!(
+                g.kind,
                 Kind::Drag {
-                    from: Mode::Idle { active } | Mode::Minimized { active },
+                    from: Mode::Idle { .. } | Mode::Minimized { .. },
                     ..
-                } => (Some((g.start.y - g.last.y).max(0.0)), active),
-                _ => (None, 0),
-            },
-            None => (None, 0),
-        };
+                }
+            );
+            from_bar.then(|| (g.start.y - g.last.y).max(0.0))
+        });
         View {
             mode: self.mode,
             strip: self.mode == Mode::Hidden,
@@ -212,7 +210,6 @@ impl NavState {
                 from_strip.then(|| (g.start.y - g.last.y).max(0.0))
             }),
             lift,
-            lift_page,
             release: self.release,
             exit: self.exit,
             last_page: self.last_page,
@@ -887,7 +884,6 @@ mod tests {
         assert_eq!(r.s.view().lift, Some(40.0));
         r.mv(306.0, BAR_Y - 200.0, 3016);
         assert_eq!(r.s.view().lift, Some(200.0));
-        assert_eq!(r.s.view().lift_page, 1);
         r.mv(306.0, BAR_Y + 20.0, 3024);
         assert_eq!(r.s.view().lift, Some(0.0));
         r.up(3030);
