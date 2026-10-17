@@ -45,6 +45,9 @@ pub struct NavDockConfig {
     pub throw_easing_slope: f32,
     /// Share of finger travel past the dock's rest height that it follows.
     pub dock_rubber: f32,
+    /// Share of the distance between two icon centres the finger must
+    /// cross, measured from the hovered icon, before the hover moves.
+    pub hover_stickiness: f32,
 }
 
 impl Default for NavDockConfig {
@@ -74,6 +77,7 @@ impl Default for NavDockConfig {
             max_throw_time: Duration::from_millis(220),
             throw_easing_slope: 3.0,
             dock_rubber: 0.3,
+            hover_stickiness: 0.75,
         }
     }
 }

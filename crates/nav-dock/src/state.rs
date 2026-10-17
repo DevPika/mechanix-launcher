@@ -3,7 +3,7 @@
 
 use std::time::Instant;
 
-use gestures::{Axis, AxisLock, VelocityTracker, snap_page};
+use gestures::{snap_page, Axis, AxisLock, VelocityTracker};
 use mecha_wayland::prelude::{Point, Size};
 
 use crate::config::NavDockConfig;
@@ -278,9 +278,11 @@ impl NavState {
             *held = false;
         }
         if !*held {
-            self.mode = Mode::Dragging {
-                hover: self.nearest_icon(g.last.x),
+            let hover = match self.mode {
+                Mode::Dragging { hover } => self.sticky_icon(hover, g.last.x),
+                _ => self.nearest_icon(g.last.x),
             };
+            self.mode = Mode::Dragging { hover };
         }
     }
 
@@ -372,6 +374,25 @@ impl NavState {
             min + (dx - min) * k
         } else {
             dx
+        }
+    }
+
+    /// Hover with hysteresis: from `current`, step toward `x` one icon at a
+    /// time, each step only once `x` is past `hover_stickiness` of the way
+    /// to the next centre.
+    fn sticky_icon(&self, current: usize, x: f32) -> usize {
+        let last = self.section_count.saturating_sub(1);
+        let s = self.config.hover_stickiness;
+        let mut k = current.min(last);
+        loop {
+            let c = self.icon_center_x(k);
+            if k < last && x > c + s * (self.icon_center_x(k + 1) - c) {
+                k += 1;
+            } else if k > 0 && x < c + s * (self.icon_center_x(k - 1) - c) {
+                k -= 1;
+            } else {
+                return k;
+            }
         }
     }
 
@@ -640,6 +661,30 @@ mod tests {
         assert_eq!(r.mode(), Mode::Dragging { hover: 4 });
         r.up(330);
         assert_eq!(r.mode(), Mode::Minimized { active: 4 });
+    }
+
+    #[test]
+    fn hover_resists_until_75_percent() {
+        let mut r = Rig::new();
+        r.past_hold(306.0);
+        let (c2, c3) = (r.s.icon_center_x(2), r.s.icon_center_x(3));
+        r.mv(c2 + 0.7 * (c3 - c2), 1290.0, 240);
+        assert_eq!(r.mode(), Mode::Dragging { hover: 2 });
+        r.mv(c2 + 0.8 * (c3 - c2), 1290.0, 250);
+        assert_eq!(r.mode(), Mode::Dragging { hover: 3 });
+        r.mv(c3 - 0.3 * (c3 - c2), 1290.0, 260);
+        assert_eq!(r.mode(), Mode::Dragging { hover: 3 });
+        r.mv(c3 - 0.8 * (c3 - c2), 1290.0, 270);
+        assert_eq!(r.mode(), Mode::Dragging { hover: 2 });
+    }
+
+    #[test]
+    fn fast_move_across_icons_lands_correctly() {
+        let mut r = Rig::new();
+        r.past_hold(r.s.icon_center_x(0));
+        let x = r.s.icon_center_x(4);
+        r.mv(x, 1290.0, 240);
+        assert_eq!(r.mode(), Mode::Dragging { hover: 4 });
     }
 
     #[test]
