@@ -16,7 +16,10 @@ pub fn snap_page(
     if delta == 0 && offset.abs() > page_width * min_fraction {
         delta = if offset < 0.0 { 1 } else { -1 };
     }
-    (current as isize + delta).clamp(0, count as isize - 1) as usize
+    // A zero page width projects to ±inf, which saturates `delta`.
+    (current as isize)
+        .saturating_add(delta)
+        .clamp(0, count as isize - 1) as usize
 }
 
 #[cfg(test)]
@@ -42,5 +45,11 @@ mod tests {
     fn snap_clamps() {
         assert_eq!(snap_page(0, 2000.0, 3.0, 540.0, 5, 180.0, 0.16), 0);
         assert_eq!(snap_page(4, -2000.0, -3.0, 540.0, 5, 180.0, 0.16), 4);
+    }
+
+    #[test]
+    fn snap_zero_width_does_not_panic() {
+        assert_eq!(snap_page(1, -100.0, 0.0, 0.0, 5, 180.0, 0.16), 4);
+        assert_eq!(snap_page(1, 100.0, 0.0, 0.0, 5, 180.0, 0.16), 0);
     }
 }

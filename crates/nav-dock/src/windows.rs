@@ -129,12 +129,13 @@ fn emphasis(mode: Mode) -> Option<usize> {
 }
 
 fn spawn(app: &mut App, surface: Surface, view: View) -> NodeId {
-    let (config, icons, screen) = {
+    let (config, icons, screen, overlay_height) = {
         let nav = app.resource::<NavDock>();
         (
             nav.state.config().clone(),
             nav.icons.clone(),
             nav.state.screen(),
+            nav.overlay_height,
         )
     };
     match surface {
@@ -152,7 +153,10 @@ fn spawn(app: &mut App, surface: Surface, view: View) -> NodeId {
             // `spawn_page` needs the whole app, so the sections step out
             // of the resource while their pages are built.
             let sections = std::mem::take(&mut app.resource_mut::<NavDock>().sections);
-            let window = spawn_overlay(app, &config, &sections, screen, overlay);
+            // Start at the last overlay height, so the first frame does not
+            // jump from the full screen height to the overlay's own.
+            let size = Size::new(screen.width, overlay_height.unwrap_or(screen.height));
+            let window = spawn_overlay(app, &config, &sections, size, overlay);
             app.resource_mut::<NavDock>().sections = sections;
             window
         }
@@ -456,6 +460,32 @@ pub(crate) mod tests {
         let cell = r.app.children(row).unwrap()[0];
         let cell = r.app.component::<LayoutStyle>(cell).unwrap();
         assert_eq!((cell.width, cell.height), (px(700.0), px(1324.0)));
+    }
+
+    #[test]
+    fn respawned_overlay_starts_at_overlay_height() {
+        let mut r = Rig::new();
+        r.reveal();
+        r.up(50);
+        let overlay = r.set().overlay.unwrap();
+        r.app.emit(
+            Resized {
+                size: Size::new(612.0, 1324.0),
+            },
+            overlay,
+        );
+        r.app.tick();
+        r.down(Surface::Overlay, 306.0, 600.0, 1000);
+        r.mv(306.0, 650.0, 1016);
+        r.mv(306.0, 700.0, 1032);
+        r.up(1200);
+        assert_eq!(r.set().overlay, None);
+        r.down(Surface::Strip, 306.0, 1350.0, 2000);
+        r.mv(306.0, 1340.0, 2016);
+        let row = r.content(r.set().overlay.unwrap());
+        let cell = r.app.children(row).unwrap()[0];
+        let cell = r.app.component::<LayoutStyle>(cell).unwrap();
+        assert_eq!((cell.width, cell.height), (px(612.0), px(1324.0)));
     }
 
     #[test]

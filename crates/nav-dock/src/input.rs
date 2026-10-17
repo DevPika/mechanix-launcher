@@ -201,13 +201,15 @@ mod tests {
             "release ends the gesture"
         );
         assert!(nav.pressed.is_empty());
-        // Real time makes that release a flick home, so the strip is back.
-        let strip = nav.windows.strip.expect("strip is back");
+        // Real-time samples span less than `velocity_min_span`, so that
+        // release is no flick: it commits, and the bar is up.
+        let bar = nav.windows.bar.expect("bar is up");
         let after = mode(&app);
+        assert!(matches!(after, Mode::Minimized { .. }));
 
         contact(
             &mut app,
-            strip,
+            bar,
             ContactId::Mouse,
             ContactPhase::Moved,
             60.0,

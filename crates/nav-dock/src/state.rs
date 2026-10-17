@@ -82,7 +82,11 @@ impl NavState {
             .iter()
             .position(|id| *id == config.default_section)
             .unwrap_or(0);
-        let velocity = VelocityTracker::new(config.velocity_window, config.velocity_stale);
+        let velocity = VelocityTracker::new(
+            config.velocity_window,
+            config.velocity_stale,
+            config.velocity_min_span,
+        );
         Self {
             config,
             section_count: section_ids.len(),
@@ -141,7 +145,11 @@ impl NavState {
         View {
             mode: self.mode,
             strip: self.mode == Mode::Hidden,
-            overlay: page.map(|page| OverlayView { page, dx, dy }),
+            overlay: page.map(|page| OverlayView {
+                page,
+                dx: self.resist(page, dx),
+                dy,
+            }),
             held_surface: self.gesture.as_ref().map(|g| g.surface),
         }
     }
@@ -185,14 +193,20 @@ impl NavState {
                     self.mode = Mode::Dragging {
                         hover: self.default_index,
                     };
-                    g.kind = Kind::Drag { held: true };
+                    g.kind = Kind::Drag {
+                        held: true,
+                        from: Mode::Hidden,
+                    };
                     self.drag(&mut g, t);
                 }
             }
             Kind::Drag { .. } => self.drag(&mut g, t),
             Kind::BarPending => {
                 if travel.x.hypot(travel.y) > self.config.reveal_px {
-                    g.kind = Kind::Drag { held: false };
+                    g.kind = Kind::Drag {
+                        held: false,
+                        from: self.mode,
+                    };
                     self.drag(&mut g, t);
                 }
             }
@@ -205,7 +219,7 @@ impl NavState {
     /// Hover update for a drag: held on the default section until the
     /// finger has gone far enough up and long enough, then nearest icon.
     fn drag(&mut self, g: &mut Gesture, t: Instant) {
-        let Kind::Drag { held } = &mut g.kind else {
+        let Kind::Drag { held, .. } = &mut g.kind else {
             return;
         };
         if *held
@@ -267,13 +281,31 @@ impl NavState {
         }
     }
 
+    /// Drops the live touch; a drag goes back to the mode it started from.
     fn cancel(&mut self) {
         if let Some(Gesture {
-            kind: Kind::Drag { .. },
+            kind: Kind::Drag { from, .. },
             ..
         }) = self.gesture.take()
         {
-            self.mode = Mode::Hidden;
+            self.mode = from;
+        }
+    }
+
+    /// A live page drag `dx` on `page`: 1:1 while another page is still
+    /// under the row, scaled by `page_edge_resistance` past the first or
+    /// last page.
+    fn resist(&self, page: usize, dx: f32) -> f32 {
+        let width = self.screen.width;
+        let max = page as f32 * width;
+        let min = -(self.section_count.saturating_sub(page + 1) as f32) * width;
+        let k = self.config.page_edge_resistance;
+        if dx > max {
+            max + (dx - max) * k
+        } else if dx < min {
+            min + (dx - min) * k
+        } else {
+            dx
         }
     }
 
@@ -318,8 +350,9 @@ impl Gesture {
 enum Kind {
     /// Hidden, finger on the strip, not yet `reveal_px` up.
     StripPending,
-    /// Dragging; `held` while the hold keeps the default hover.
-    Drag { held: bool },
+    /// Dragging; `held` while the hold keeps the default hover. `from` is
+    /// the mode the drag started in, restored on cancel.
+    Drag { held: bool, from: Mode },
     /// Minimized, finger on the bar, not yet moved.
     BarPending,
     /// Idle, finger on the dock.
@@ -548,6 +581,46 @@ mod tests {
         assert_eq!(v.mode, Mode::Hidden);
         assert_eq!(v.overlay, None);
         assert_eq!(v.held_surface, None);
+    }
+
+    #[test]
+    fn cancel_while_dragging_from_bar_restores_minimized() {
+        let mut r = Rig::minimized(1);
+        r.down(Surface::Bar, 306.0, BAR_Y, 3000);
+        let x = r.s.icon_center_x(4);
+        r.mv(x, BAR_Y, 3008);
+        assert_eq!(r.mode(), Mode::Dragging { hover: 4 });
+        r.s.handle(DockEvent::Cancel);
+        let v = r.s.view();
+        assert_eq!(v.mode, Mode::Minimized { active: 1 });
+        assert_eq!(v.held_surface, None);
+    }
+
+    #[test]
+    fn cancel_during_overlay_drag_snaps_back() {
+        let mut r = Rig::minimized(2);
+        r.down(Surface::Overlay, 306.0, 600.0, 3000);
+        r.mv(150.0, 605.0, 3016);
+        assert_eq!(r.overlay().dx, -156.0);
+        r.s.handle(DockEvent::Cancel);
+        assert_eq!(r.mode(), Mode::Minimized { active: 2 });
+        assert_eq!((r.overlay().dx, r.overlay().dy), (0.0, 0.0));
+        assert_eq!(r.s.view().held_surface, None);
+    }
+
+    #[test]
+    fn page_drag_resists_past_ends() {
+        let drag = |page: usize, finger: f32| {
+            let mut r = Rig::minimized(page);
+            r.down(Surface::Overlay, 306.0, 600.0, 3000);
+            r.mv(306.0 + finger, 600.0, 3016);
+            r.overlay().dx
+        };
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-3;
+        assert!(close(drag(0, 200.0), 60.0), "page 0: {}", drag(0, 200.0));
+        assert!(close(drag(4, -200.0), -60.0), "last: {}", drag(4, -200.0));
+        assert_eq!(drag(2, 200.0), 200.0);
+        assert_eq!(drag(2, -200.0), -200.0);
     }
 
     #[test]

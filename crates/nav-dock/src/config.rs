@@ -15,11 +15,15 @@ pub struct NavDockConfig {
     pub flick_px_per_ms: f32,
     pub velocity_window: Duration,
     pub velocity_stale: Duration,
+    /// Samples spanning less time than this give zero velocity.
+    pub velocity_min_span: Duration,
     /// Downward drag over the overlay that closes it.
     pub close_px: f32,
     pub axis_lock_px: f32,
     pub page_momentum_ms: f32,
     pub page_min_fraction: f32,
+    /// Share of a page drag past the first or last page that the row follows.
+    pub page_edge_resistance: f32,
     /// Expanded dock, (width, height) in px.
     pub dock_size: (f32, f32),
     pub dock_bottom_gap: f32,
@@ -44,10 +48,12 @@ impl Default for NavDockConfig {
             flick_px_per_ms: 0.9,
             velocity_window: Duration::from_millis(80),
             velocity_stale: Duration::from_millis(80),
+            velocity_min_span: Duration::from_millis(8),
             close_px: 90.0,
             axis_lock_px: 10.0,
             page_momentum_ms: 180.0,
             page_min_fraction: 0.16,
+            page_edge_resistance: 0.3,
             dock_size: (464.0, 73.0),
             dock_bottom_gap: 26.0,
             bar_size: (160.0, 12.0),

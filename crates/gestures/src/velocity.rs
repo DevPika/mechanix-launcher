@@ -5,12 +5,15 @@ use std::time::{Duration, Instant};
 pub struct VelocityTracker {
     window: Duration,
     stale: Duration,
+    /// Shortest time between the oldest and newest sample in the window
+    /// that gives a velocity; a tighter burst gives zero.
+    min_span: Duration,
     samples: VecDeque<(Instant, f32, f32)>,
 }
 
 impl VelocityTracker {
-    pub fn new(window: Duration, stale: Duration) -> Self {
-        Self { window, stale, samples: VecDeque::new() }
+    pub fn new(window: Duration, stale: Duration, min_span: Duration) -> Self {
+        Self { window, stale, min_span, samples: VecDeque::new() }
     }
 
     pub fn push(&mut self, t: Instant, x: f32, y: f32) {
@@ -24,7 +27,8 @@ impl VelocityTracker {
         }
     }
 
-    /// Velocity in px/ms, or `(0.0, 0.0)` if stale or underdetermined.
+    /// Velocity in px/ms, or `(0.0, 0.0)` if stale, underdetermined or
+    /// spanning less than `min_span`.
     pub fn velocity(&self, now: Instant) -> (f32, f32) {
         let Some(&(newest, ..)) = self.samples.back() else {
             return (0.0, 0.0);
@@ -41,6 +45,9 @@ impl VelocityTracker {
             return (0.0, 0.0);
         }
         let t0 = recent[0].0;
+        if recent[recent.len() - 1].0.saturating_duration_since(t0) < self.min_span {
+            return (0.0, 0.0);
+        }
         let n = recent.len() as f64;
         let ts: Vec<f64> = recent
             .iter()
@@ -74,7 +81,11 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn tracker() -> VelocityTracker {
-        VelocityTracker::new(Duration::from_millis(100), Duration::from_millis(80))
+        VelocityTracker::new(
+            Duration::from_millis(100),
+            Duration::from_millis(80),
+            Duration::from_millis(8),
+        )
     }
 
     #[test]
@@ -110,6 +121,16 @@ mod tests {
         }
         let (_, vy) = v.velocity(burst + Duration::from_millis(32));
         assert!(vy.abs() < 1.5, "vy = {vy}");
+    }
+
+    #[test]
+    fn burst_after_stall_gives_zero() {
+        let t0 = Instant::now();
+        let mut v = tracker();
+        v.push(t0, 0.0, 100.0);
+        v.push(t0 + Duration::from_micros(250), 0.0, 85.0);
+        v.push(t0 + Duration::from_micros(500), 0.0, 70.0);
+        assert_eq!(v.velocity(t0 + Duration::from_micros(500)), (0.0, 0.0));
     }
 
     #[test]
