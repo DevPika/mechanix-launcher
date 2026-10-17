@@ -1,5 +1,6 @@
 //! The overlay: a full-screen Top-layer window holding every section page
-//! in one row, slid sideways to page and down to close.
+//! in one row, slid sideways to page and down to close, and the dock/bar
+//! morph drawn above it.
 
 use std::time::Duration;
 
@@ -7,6 +8,7 @@ use mecha_wayland::prelude::*;
 use nav_dock_api::Section;
 
 use crate::config::NavDockConfig;
+use crate::dock::{DockMorphBuilder, Look};
 use crate::state::OverlayView;
 use crate::windows::eased_layout;
 
@@ -23,13 +25,16 @@ impl Event for OverlayUpdate {}
 
 /// Spawns the overlay window and builds every page once, each into a
 /// fixed-size cell of `size` (the screen, until the window's own
-/// `Resized` says otherwise).
+/// `Resized` says otherwise). The morph, spawned after the row so it draws
+/// above it, starts in `look` emphasising `focus`.
 pub(crate) fn spawn_overlay(
     app: &mut App,
     config: &NavDockConfig,
     sections: &[Box<dyn Section>],
+    icons: &[SpriteId],
     size: Size,
     view: OverlayView,
+    (look, focus): (Look, usize),
 ) -> NodeId {
     let role = Role::Layer(LayerRole {
         layer: Layer::Top,
@@ -69,7 +74,24 @@ pub(crate) fn spawn_overlay(
     app.widget_mut::<OverlayRow>(row)
         .expect("row was just spawned")
         .cells = cells;
+    app.spawn(
+        win,
+        DockMorphBuilder {
+            icons: icons.to_vec(),
+            config: config.clone(),
+            look,
+            focus,
+        },
+    );
     win
+}
+
+/// The overlay's page row and its morph, in that order.
+pub(crate) fn parts(app: &App, overlay: NodeId) -> Option<(NodeId, NodeId)> {
+    match app.children(overlay)? {
+        [row, morph] => Some((*row, *morph)),
+        _ => None,
+    }
 }
 
 /// The row of pages. Its `left` is `-(page * width) + dx` and its `top`

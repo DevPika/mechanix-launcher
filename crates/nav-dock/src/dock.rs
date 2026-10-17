@@ -1,17 +1,14 @@
-//! The expanded dock (a pill of section icons) and the minimized bar (a
-//! black pill of dots), each in its own bottom-centre window.
-
-use std::time::Duration;
+//! `DockMorph`: the one element that is the expanded dock (a pill of
+//! section icons) and the minimized bar (a black pill of dots), morphing
+//! between the two inside the overlay window.
 
 use mecha_wayland::prelude::*;
 
 use crate::config::NavDockConfig;
-use crate::windows::{bottom_centre_role, eased_layout, eased_paint};
+use crate::state::Mode;
+use crate::windows::{eased_layout, eased_paint};
 
-pub(crate) const DOCK_NAMESPACE: &str = "mechanix-nav-dock";
-pub(crate) const BAR_NAMESPACE: &str = "mechanix-nav-bar";
-
-/// Alpha of the dock pill's `SurfaceContainerHighest` fill.
+/// Alpha of the expanded pill's `SurfaceContainerHighest` fill.
 const PILL_ALPHA: f32 = 0.2;
 /// Side of the box behind a plain icon, and behind the emphasised one.
 const ICON_BOX: f32 = 44.0;
@@ -21,176 +18,257 @@ const EMPHASIS_ALPHA: f32 = 0.24;
 /// Diameter of a bar dot.
 const DOT: f32 = 4.0;
 
-/// Emphasise icon `.0` of the dock row. Emitted at the row node.
+/// Which of its two shapes the morph takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct DockFocus(pub usize);
-impl Event for DockFocus {}
+pub(crate) enum Look {
+    /// `dock_size`, icons shown, dots at size 0.
+    Expanded,
+    /// `bar_size`, black, icons at size 0, dots shown.
+    Bar,
+}
 
-/// Highlight dot `.0` of the bar. Emitted at the bar node.
+impl Look {
+    /// The look a mode shows, and the section it emphasises: the hovered
+    /// one while dragging, the active one otherwise. `None` while Hidden.
+    pub(crate) fn of(mode: Mode) -> Option<(Look, usize)> {
+        match mode {
+            Mode::Dragging { hover } => Some((Look::Expanded, hover)),
+            Mode::Idle { active } => Some((Look::Expanded, active)),
+            Mode::Minimized { active } => Some((Look::Bar, active)),
+            Mode::Hidden => None,
+        }
+    }
+
+    /// The pill's (width, height).
+    fn size(self, config: &NavDockConfig) -> (f32, f32) {
+        match self {
+            Look::Expanded => config.dock_size,
+            Look::Bar => config.bar_size,
+        }
+    }
+
+    /// Empty overlay below the pill.
+    pub(crate) fn gap(self, config: &NavDockConfig) -> f32 {
+        match self {
+            Look::Expanded => config.dock_bottom_gap,
+            Look::Bar => config.bar_bottom_gap,
+        }
+    }
+
+    /// Where the pill settles in an overlay of `overlay` size, in the
+    /// overlay's coordinates: horizontally centred, `gap` above the bottom.
+    pub(crate) fn target_rect(self, config: &NavDockConfig, overlay: Size) -> Rect {
+        let (width, height) = self.size(config);
+        Rect::new(
+            (overlay.width - width) / 2.0,
+            overlay.height - self.gap(config) - height,
+            width,
+            height,
+        )
+    }
+}
+
+/// Show `look`, emphasising section `focus`. Emitted at the morph node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct BarActive(pub usize);
-impl Event for BarActive {}
+pub(crate) struct MorphUpdate {
+    pub look: Look,
+    pub focus: usize,
+}
+impl Event for MorphUpdate {}
 
-/// Spawns the dock window, `dock_size` with `dock_bottom_gap` of empty
-/// window below the pill, and the row in it with `emphasis` highlighted.
-pub(crate) fn spawn_dock(
-    app: &mut App,
-    config: &NavDockConfig,
-    icons: &[SpriteId],
-    emphasis: usize,
-) -> NodeId {
-    let (width, height) = config.dock_size;
-    let win = spawn_bottom_window(app, DOCK_NAMESPACE, width, height + config.dock_bottom_gap);
-    app.spawn(
-        win,
-        DockRowBuilder {
-            icons: icons.to_vec(),
-            height,
-            emphasis,
-            anim: config.anim,
-        },
-    );
-    win
+/// The dock/bar element: one equal-width slot per section, so icon `i` is
+/// centred where `NavState::icon_center_x(i)` expects it. Each slot holds
+/// the icon (in its emphasis box) and the dot; the look decides which of
+/// the two has size, so a change of look grows one and shrinks the other.
+pub(crate) struct DockMorph {
+    /// Per slot: the emphasis box, the icon inside it, and the dot.
+    cells: Vec<Cell>,
+    /// The icons' natural side.
+    icon_side: f32,
+    config: NavDockConfig,
+    look: Look,
+    focus: usize,
 }
 
-/// Spawns the bar window, `bar_size` with `bar_bottom_gap` below, and the
-/// bar in it with dot `active` highlighted.
-pub(crate) fn spawn_bar(
-    app: &mut App,
-    config: &NavDockConfig,
-    count: usize,
-    active: usize,
-) -> NodeId {
-    let (width, height) = config.bar_size;
-    let win = spawn_bottom_window(app, BAR_NAMESPACE, width, height + config.bar_bottom_gap);
-    app.spawn(
-        win,
-        BarBuilder {
-            count,
-            height,
-            active,
-            anim: config.anim,
-        },
-    );
-    win
-}
-
-/// A column window of a fixed size. Windows are opaque, so the area around
-/// the pill clears to `Surface`, the colour of the page underneath.
-fn spawn_bottom_window(app: &mut App, namespace: &str, width: f32, height: f32) -> NodeId {
-    let clear = app.color(ColorRole::Surface);
-    let root = app.root();
-    app.spawn_with(
-        root,
-        window()
-            .title(namespace)
-            .layout(LayoutStyle::default().column().size(px(width), px(height)))
-            .clear(clear),
-        (bottom_centre_role(namespace),),
-    )
-    .id()
-}
-
-// ---------------------------------------------------------------------------
-// Dock row
-// ---------------------------------------------------------------------------
-
-/// The expanded dock: one equal-width slot per section, so icon `i` is
-/// centred where `NavState::icon_center_x(i)` expects it.
-pub(crate) struct DockRow {
-    /// Per slot: the emphasis box and the icon inside it.
-    cells: Vec<(Handle<Div>, Handle<Icon>)>,
-    emphasis: usize,
+#[derive(Clone, Copy)]
+struct Cell {
+    hl: Handle<Div>,
+    icon: Handle<Icon>,
+    dot: Handle<Div>,
 }
 
 #[cfg(test)]
-impl DockRow {
-    pub(crate) fn emphasis(&self) -> usize {
-        self.emphasis
+impl DockMorph {
+    pub(crate) fn look(&self) -> (Look, usize) {
+        (self.look, self.focus)
     }
 }
 
-pub(crate) struct DockRowBuilder {
-    icons: Vec<SpriteId>,
-    height: f32,
-    emphasis: usize,
-    anim: Duration,
+pub(crate) struct DockMorphBuilder {
+    pub(crate) icons: Vec<SpriteId>,
+    pub(crate) config: NavDockConfig,
+    pub(crate) look: Look,
+    pub(crate) focus: usize,
 }
 
-impl Build for DockRowBuilder {
-    type Widget = DockRow;
+impl Build for DockMorphBuilder {
+    type Widget = DockMorph;
 }
 
-impl Widget for DockRow {
-    type Builder = DockRowBuilder;
+impl Widget for DockMorph {
+    type Builder = DockMorphBuilder;
 
-    fn build(b: DockRowBuilder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-        *s.component_mut::<LayoutStyle>(me).unwrap() = LayoutStyle::default()
-            .row()
-            .align_items(Align::Center)
-            .width(percent(100.0))
-            .height(px(b.height));
-        *s.component_mut::<Paint>(me).unwrap() = Paint::Quad(pill(s, b.height));
-        *s.component_mut::<LayoutAnimationSettings>(me).unwrap() = eased_layout(b.anim);
-        *s.component_mut::<PaintAnimationSettings>(me).unwrap() = eased_paint(b.anim);
+    fn build(b: DockMorphBuilder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
+        *s.component_mut::<LayoutStyle>(me).unwrap() = pill_style(&b.config, b.look);
+        *s.component_mut::<Paint>(me).unwrap() = Paint::Quad(pill_quad(s, &b.config, b.look));
+        *s.component_mut::<LayoutAnimationSettings>(me).unwrap() = eased_layout(b.config.anim);
+        *s.component_mut::<PaintAnimationSettings>(me).unwrap() = eased_paint(b.config.anim);
 
+        let icon_side = b
+            .icons
+            .first()
+            .map_or(0.0, |&id| s.resource::<Atlas>().sprite(id).size.width);
         let slot_width = 100.0 / b.icons.len().max(1) as f32;
-        let mut cells = Vec::with_capacity(b.icons.len());
-        for (i, sprite) in b.icons.iter().enumerate() {
-            let look = IconLook::of(s, i == b.emphasis);
-            let slot = s.spawn(
-                me,
-                div().style(
-                    LayoutStyle::default()
-                        .center()
-                        .width(percent(slot_width))
-                        .height(percent(100.0)),
-                ),
-            );
-            let hl = s.spawn(slot, div().style(look.box_style()));
-            *s.component_mut::<Paint>(hl).unwrap() = Paint::Quad(look.box_quad());
-            let ic = s.spawn(hl, icon(*sprite).color(look.tint));
-            cells.push((hl, ic));
-        }
+        let cells = b
+            .icons
+            .iter()
+            .enumerate()
+            .map(|(i, &sprite)| {
+                let l = CellLook::of(s, b.look, i == b.focus, icon_side);
+                let slot = s.spawn(
+                    me,
+                    div().style(
+                        LayoutStyle::default()
+                            .center()
+                            .width(percent(slot_width))
+                            .height(percent(100.0)),
+                    ),
+                );
+                let hl = s.spawn(slot, div().style(l.hl_style));
+                *s.component_mut::<Paint>(hl).unwrap() = Paint::Quad(l.hl_quad);
+                let icon = s.spawn(hl, icon(sprite).style(l.icon_style).color(l.tint));
+                let dot = s.spawn(slot, div().style(l.dot_style));
+                *s.component_mut::<Paint>(dot).unwrap() = Paint::Quad(l.dot_quad);
+                Cell { hl, icon, dot }
+            })
+            .collect();
 
-        s.on::<DockFocus>(me, |ctx, e| {
-            ctx.me().emphasis = e.0;
-            apply_emphasis(ctx);
+        s.on::<MorphUpdate>(me, |ctx, e| {
+            let morph = ctx.me();
+            if (morph.look, morph.focus) == (e.look, e.focus) {
+                return;
+            }
+            morph.look = e.look;
+            morph.focus = e.focus;
+            apply(ctx);
         });
-        let height = b.height;
-        s.on_theme(me, move |ctx| {
-            let quad = pill(ctx, height);
-            ctx.set_paint(Paint::Quad(quad));
-            apply_emphasis(ctx);
-        });
+        s.on_theme(me, apply);
 
-        DockRow {
+        DockMorph {
             cells,
-            emphasis: b.emphasis,
+            icon_side,
+            config: b.config,
+            look: b.look,
+            focus: b.focus,
         }
     }
 }
 
-fn pill(theme: &impl ThemeReader, height: f32) -> Quad {
-    let fill = theme
-        .color(ColorRole::SurfaceContainerHighest)
-        .with_alpha(PILL_ALPHA);
+/// The pill's style for `look`: absolute in the overlay, horizontally
+/// centred, its bottom edge `bottom` above the overlay's.
+fn pill_style(config: &NavDockConfig, look: Look) -> LayoutStyle {
+    let (width, height) = look.size(config);
+    // The one place the pill's height above the bottom is set; for now it
+    // rests at the look's gap.
+    let bottom = look.gap(config);
+    LayoutStyle::default()
+        .row()
+        .align_items(Align::Center)
+        .absolute()
+        .size(px(width), px(height))
+        .inset(Insets::new(auto(), auto(), px(bottom), percent(50.0)))
+        .margin(Insets::new(px(0.0), px(0.0), px(0.0), px(-width / 2.0)))
+}
+
+fn pill_quad(theme: &impl ThemeReader, config: &NavDockConfig, look: Look) -> Quad {
+    let (_, height) = look.size(config);
+    let fill = match look {
+        Look::Expanded => theme
+            .color(ColorRole::SurfaceContainerHighest)
+            .with_alpha(PILL_ALPHA),
+        Look::Bar => Color::BLACK,
+    };
     Quad::new(fill).radius(height / 2.0)
 }
 
-fn apply_emphasis(ctx: &mut Context<'_, DockRow>) {
-    let emphasis = ctx.me().emphasis;
-    let cells = ctx.me().cells.clone();
-    for (i, (hl, ic)) in cells.into_iter().enumerate() {
-        let look = IconLook::of(ctx, i == emphasis);
-        if let Some(mut hl) = ctx.at(hl) {
-            hl.set_style(look.box_style());
-            hl.set_paint(Paint::Quad(look.box_quad()));
+/// Writes the pill and every slot for the current look and focus.
+fn apply(ctx: &mut Context<'_, DockMorph>) {
+    let (cells, icon_side, config, look, focus) = {
+        let m = ctx.me();
+        (
+            m.cells.clone(),
+            m.icon_side,
+            m.config.clone(),
+            m.look,
+            m.focus,
+        )
+    };
+    ctx.set_style(pill_style(&config, look));
+    let quad = pill_quad(ctx, &config, look);
+    ctx.set_paint(Paint::Quad(quad));
+
+    for (i, cell) in cells.into_iter().enumerate() {
+        let l = CellLook::of(ctx, look, i == focus, icon_side);
+        if let Some(mut hl) = ctx.at(cell.hl) {
+            hl.set_style(l.hl_style);
+            hl.set_paint(Paint::Quad(l.hl_quad));
         }
-        if let Some(mut ic) = ctx.at(ic) {
-            ic.set_color(look.tint);
+        if let Some(mut ic) = ctx.at(cell.icon) {
+            ic.set_style(l.icon_style);
+            ic.set_color(l.tint);
+        }
+        if let Some(mut dot) = ctx.at(cell.dot) {
+            dot.set_style(l.dot_style);
+            dot.set_paint(Paint::Quad(l.dot_quad));
         }
     }
+}
+
+/// One slot in one look. Expanded: the icon box and icon at size, the dot
+/// at 0. Bar: the other way round. Sprite paint cannot fade, so icons go
+/// and dots come through their layout size.
+struct CellLook {
+    hl_style: LayoutStyle,
+    hl_quad: Quad,
+    icon_style: LayoutStyle,
+    tint: Color,
+    dot_style: LayoutStyle,
+    dot_quad: Quad,
+}
+
+impl CellLook {
+    fn of(theme: &impl ThemeReader, look: Look, emphasised: bool, icon_side: f32) -> Self {
+        let mut icon = IconLook::of(theme, emphasised);
+        let (icon_side, dot_side) = match look {
+            Look::Expanded => (icon_side, 0.0),
+            Look::Bar => {
+                icon.side = 0.0;
+                (0.0, DOT)
+            }
+        };
+        Self {
+            hl_style: icon.box_style(),
+            hl_quad: icon.box_quad(),
+            icon_style: square(icon_side),
+            tint: icon.tint,
+            dot_style: square(dot_side),
+            dot_quad: dot_quad(theme, emphasised),
+        }
+    }
+}
+
+fn square(side: f32) -> LayoutStyle {
+    LayoutStyle::default().size(px(side), px(side)).shrink(0.0)
 }
 
 /// How one icon looks, plain or emphasised. The box behind is always a
@@ -220,79 +298,11 @@ impl IconLook {
     }
 
     fn box_style(&self) -> LayoutStyle {
-        LayoutStyle::default()
-            .center()
-            .size(px(self.side), px(self.side))
+        square(self.side).center()
     }
 
     fn box_quad(&self) -> Quad {
         Quad::new(self.fill).radius(self.side / 2.0)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Bar
-// ---------------------------------------------------------------------------
-
-/// The minimized dock: a black pill with one dot per section.
-pub(crate) struct Bar {
-    dots: Vec<Handle<Div>>,
-    active: usize,
-}
-
-#[cfg(test)]
-impl Bar {
-    pub(crate) fn active(&self) -> usize {
-        self.active
-    }
-}
-
-pub(crate) struct BarBuilder {
-    count: usize,
-    height: f32,
-    active: usize,
-    anim: Duration,
-}
-
-impl Build for BarBuilder {
-    type Widget = Bar;
-}
-
-impl Widget for Bar {
-    type Builder = BarBuilder;
-
-    fn build(b: BarBuilder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-        *s.component_mut::<LayoutStyle>(me).unwrap() = LayoutStyle::default()
-            .row()
-            .center()
-            .justify(Justify::SpaceEvenly)
-            .width(percent(100.0))
-            .height(px(b.height));
-        *s.component_mut::<Paint>(me).unwrap() =
-            Paint::Quad(Quad::new(Color::BLACK).radius(b.height / 2.0));
-        *s.component_mut::<PaintAnimationSettings>(me).unwrap() = eased_paint(b.anim);
-
-        let dots = (0..b.count)
-            .map(|i| {
-                let dot = s.spawn(
-                    me,
-                    div().style(LayoutStyle::default().size(px(DOT), px(DOT))),
-                );
-                *s.component_mut::<Paint>(dot).unwrap() = Paint::Quad(dot_quad(s, i == b.active));
-                dot
-            })
-            .collect();
-
-        s.on::<BarActive>(me, |ctx, e| {
-            ctx.me().active = e.0;
-            apply_active(ctx);
-        });
-        s.on_theme(me, apply_active);
-
-        Bar {
-            dots,
-            active: b.active,
-        }
     }
 }
 
@@ -303,15 +313,4 @@ fn dot_quad(theme: &impl ThemeReader, active: bool) -> Quad {
         ColorRole::OnSurfaceVariant
     };
     Quad::new(theme.color(role)).radius(DOT / 2.0)
-}
-
-fn apply_active(ctx: &mut Context<'_, Bar>) {
-    let active = ctx.me().active;
-    let dots = ctx.me().dots.clone();
-    for (i, dot) in dots.into_iter().enumerate() {
-        let quad = dot_quad(ctx, i == active);
-        if let Some(mut dot) = ctx.at(dot) {
-            dot.set_paint(Paint::Quad(quad));
-        }
-    }
 }

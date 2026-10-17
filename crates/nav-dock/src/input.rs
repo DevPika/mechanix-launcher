@@ -5,8 +5,9 @@ use std::time::Instant;
 
 use mecha_wayland::prelude::*;
 
+use crate::dock::Look;
 use crate::state::{DockEvent, Surface};
-use crate::windows::{NavDock, reconcile, surface_of};
+use crate::windows::{NavDock, reconcile};
 
 /// The state machine's contact id for the mouse pointer, so the dock can
 /// be driven from a desktop.
@@ -30,7 +31,7 @@ pub(crate) fn on_contact(app: &mut App, c: &ContactInput) {
         let pressed = nav.pressed.contains(&contact);
         match c.phase {
             ContactPhase::Pressed | ContactPhase::Moved => {
-                let Some(surface) = surface_of(&nav, c.window).filter(|_| live) else {
+                let Some(surface) = hit(&nav, c.window, c.position).filter(|_| live) else {
                     return;
                 };
                 let pos = origin(&nav, surface) + c.position;
@@ -68,26 +69,58 @@ pub(crate) fn on_contact(app: &mut App, c: &ContactInput) {
     reconcile(app);
 }
 
-/// Screen position of `surface`'s window's top-left corner. The strip, bar
-/// and dock sit bottom-centre at the sizes they are spawned with; the
-/// overlay spans the width and ends at the bottom edge, its top pushed
-/// down by the status bar's exclusive zone.
-fn origin(nav: &NavDock, surface: Surface) -> Point {
+/// What a touch at `pos` (in `window`'s coordinates) went down on, if
+/// `window` is a dock window. In the overlay it is the dock or the bar when
+/// it lands on the morph, the page otherwise. The morph's rect is where its
+/// look settles, not where it is drawn mid-morph, so a touch classifies the
+/// same however far the animation has got.
+pub(crate) fn hit(nav: &NavDock, window: NodeId, pos: Point) -> Option<Surface> {
+    let w = nav.windows;
+    if w.strip == Some(window) {
+        return Some(Surface::Strip);
+    }
+    if w.overlay != Some(window) {
+        return None;
+    }
     let config = nav.state.config();
-    let screen = nav.state.screen();
-    let (width, height) = match surface {
-        Surface::Strip => config.strip_size,
-        Surface::Dock => (
-            config.dock_size.0,
-            config.dock_size.1 + config.dock_bottom_gap,
-        ),
-        Surface::Bar => (config.bar_size.0, config.bar_size.1 + config.bar_bottom_gap),
-        Surface::Overlay => {
-            let height = nav.overlay_height.unwrap_or(screen.height);
-            return Point::new(0.0, screen.height - height);
+    let size = Size::new(nav.state.screen().width, overlay_height(nav));
+    let surface = match Look::of(nav.state.view().mode) {
+        Some((Look::Expanded, _)) => Look::Expanded
+            .target_rect(config, size)
+            .contains(pos)
+            .then_some(Surface::Dock),
+        Some((Look::Bar, _)) => {
+            let bar = Look::Bar.target_rect(config, size);
+            let gap = Look::Bar.gap(config);
+            Rect::new(bar.x(), bar.y(), bar.width(), bar.height() + gap)
+                .contains(pos)
+                .then_some(Surface::Bar)
         }
+        None => None,
     };
-    Point::new(screen.width / 2.0 - width / 2.0, screen.height - height)
+    Some(surface.unwrap_or(Surface::Overlay))
+}
+
+/// The overlay's height: its last `Resized`, the screen's until then.
+fn overlay_height(nav: &NavDock) -> f32 {
+    nav.overlay_height.unwrap_or(nav.state.screen().height)
+}
+
+/// Screen position of the top-left corner of the window a touch on
+/// `surface` lands in. The strip sits bottom-centre at `strip_size`; the
+/// overlay, which holds the dock and the bar, spans the width and ends at
+/// the bottom edge, its top pushed down by the status bar's exclusive zone.
+fn origin(nav: &NavDock, surface: Surface) -> Point {
+    let screen = nav.state.screen();
+    match surface {
+        Surface::Strip => {
+            let (width, height) = nav.state.config().strip_size;
+            Point::new(screen.width / 2.0 - width / 2.0, screen.height - height)
+        }
+        Surface::Bar | Surface::Dock | Surface::Overlay => {
+            Point::new(0.0, screen.height - overlay_height(nav))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -145,10 +178,10 @@ mod tests {
             -10.0,
         );
         assert!(matches!(mode(&app), Mode::Dragging { .. }));
-        let dock = app.resource::<NavDock>().windows.dock;
+        let overlay = app.resource::<NavDock>().windows.overlay;
         assert!(
-            dock.is_some_and(|d| app.is_live(d)),
-            "the dock window exists"
+            overlay.is_some_and(|o| app.is_live(o)),
+            "the overlay window exists"
         );
     }
 
@@ -202,14 +235,14 @@ mod tests {
         );
         assert!(nav.pressed.is_empty());
         // Real-time samples span less than `velocity_min_span`, so that
-        // release is no flick: it commits, and the bar is up.
-        let bar = nav.windows.bar.expect("bar is up");
+        // release is no flick: it commits, and the overlay is up.
+        let overlay = nav.windows.overlay.expect("overlay is up");
         let after = mode(&app);
         assert!(matches!(after, Mode::Minimized { .. }));
 
         contact(
             &mut app,
-            bar,
+            overlay,
             ContactId::Mouse,
             ContactPhase::Moved,
             60.0,
@@ -247,15 +280,104 @@ mod tests {
         let mut app = dock_app();
         let mut nav = app.resource_mut::<NavDock>();
         assert_eq!(origin(&nav, Surface::Strip), Point::new(246.0, 1340.0));
-        assert_eq!(origin(&nav, Surface::Dock), Point::new(74.0, 1261.0));
-        assert_eq!(origin(&nav, Surface::Bar), Point::new(226.0, 1340.0));
-        assert_eq!(
-            origin(&nav, Surface::Overlay),
-            Point::ZERO,
-            "height unknown"
-        );
+        for surface in [Surface::Overlay, Surface::Dock, Surface::Bar] {
+            assert_eq!(origin(&nav, surface), Point::ZERO, "height unknown");
+        }
         nav.overlay_height = Some(1324.0);
-        assert_eq!(origin(&nav, Surface::Overlay), Point::new(0.0, 36.0));
+        for surface in [Surface::Overlay, Surface::Dock, Surface::Bar] {
+            assert_eq!(
+                origin(&nav, surface),
+                Point::new(0.0, 36.0),
+                "dock and bar live in the overlay"
+            );
+        }
+    }
+
+    /// Strip press, 20 px up, release: Minimized on the default section.
+    fn commit(app: &mut App) -> NodeId {
+        let strip = strip(app);
+        touch_down(app, strip, 60.0, 10.0);
+        contact(
+            app,
+            strip,
+            ContactId::Touch(0),
+            ContactPhase::Moved,
+            60.0,
+            -10.0,
+        );
+        contact(
+            app,
+            strip,
+            ContactId::Touch(0),
+            ContactPhase::Released,
+            60.0,
+            -10.0,
+        );
+        assert!(matches!(mode(app), Mode::Minimized { .. }));
+        app.resource::<NavDock>()
+            .windows
+            .overlay
+            .expect("overlay is up")
+    }
+
+    #[test]
+    fn bar_hit_uses_target_rect() {
+        let mut app = dock_app();
+        let overlay = commit(&mut app);
+        let nav = app.resource::<NavDock>();
+        // Overlay height unknown: the overlay is the screen, 612 x 1360.
+        // The bar is 160 x 12 with 8 below it, so it centres at y = 1346.
+        assert_eq!(
+            hit(nav, overlay, Point::new(306.0, 1346.0)),
+            Some(Surface::Bar)
+        );
+        assert_eq!(
+            hit(nav, overlay, Point::new(306.0, 1358.0)),
+            Some(Surface::Bar),
+            "the gap below the bar counts"
+        );
+        assert_eq!(
+            hit(nav, overlay, Point::new(306.0, 600.0)),
+            Some(Surface::Overlay)
+        );
+        assert_eq!(
+            hit(nav, overlay, Point::new(100.0, 1346.0)),
+            Some(Surface::Overlay),
+            "beside the bar"
+        );
+        let root = app.root();
+        assert_eq!(hit(nav, root, Point::ZERO), None, "not a dock window");
+    }
+
+    #[test]
+    fn dock_hit_in_idle() {
+        let mut app = dock_app();
+        let overlay = commit(&mut app);
+        app.resource_mut::<NavDock>().overlay_height = Some(1324.0);
+        // A bar tap, in overlay coordinates: the bar centres 14 px above
+        // the overlay's bottom edge.
+        touch_down(&mut app, overlay, 306.0, 1324.0 - 14.0);
+        contact(
+            &mut app,
+            overlay,
+            ContactId::Touch(0),
+            ContactPhase::Released,
+            306.0,
+            1310.0,
+        );
+        assert!(
+            matches!(mode(&app), Mode::Idle { .. }),
+            "the tap hit the bar"
+        );
+        let nav = app.resource::<NavDock>();
+        let x = nav.state.icon_center_x(3);
+        // The dock is 73 high with 26 below it.
+        let y = 1324.0 - 26.0 - 73.0 / 2.0;
+        assert_eq!(hit(nav, overlay, Point::new(x, y)), Some(Surface::Dock));
+        assert_eq!(
+            hit(nav, overlay, Point::new(x, 600.0)),
+            Some(Surface::Overlay)
+        );
     }
 
     #[test]
