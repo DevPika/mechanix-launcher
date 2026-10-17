@@ -22,6 +22,12 @@ pub(crate) struct NavDock {
     pub(crate) sections: Vec<Box<dyn Section>>,
     pub(crate) icons: Vec<SpriteId>,
     pub(crate) windows: WindowSet,
+    /// The overlay window's last `Resized` height: it sits below the status
+    /// bar, so it is shorter than the screen.
+    pub(crate) overlay_height: Option<f32>,
+    /// Contacts (in `DockEvent` ids) pressed on a dock window and not yet
+    /// released or cancelled.
+    pub(crate) pressed: Vec<u32>,
 }
 impl Resource for NavDock {}
 
@@ -46,8 +52,6 @@ impl WindowSet {
 }
 
 /// Which dock surface `window` is, if it is one.
-// Read by the touch input, which routes a touch by the window it hit.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn surface_of(nav: &NavDock, window: NodeId) -> Option<Surface> {
     let w = nav.windows;
     [
@@ -162,19 +166,20 @@ fn emit_at_content<E: Event>(app: &mut App, window: NodeId, event: E) {
     }
 }
 
-/// The overlay's settled size feeds the state's screen (icon centres and
-/// paging). The overlay sits below the status bar, so it is shorter than the
-/// screen: the screen only grows, to the component-wise max of both.
-pub(crate) fn on_overlay_resized(app: &mut App, e: &Emitted<Resized>) {
-    let overlay = app.resource::<NavDock>().windows.overlay;
-    if overlay.is_some_and(|w| e.targets.contains(&w)) {
-        let mut nav = app.resource_mut::<NavDock>();
-        let old = nav.state.screen();
-        let size = Size::new(
-            old.width.max(e.event.size.width),
-            old.height.max(e.event.size.height),
-        );
-        nav.state.set_screen(size);
+/// Every window's settled size feeds the state's screen (icon centres,
+/// paging and window origins). Windows other than home are smaller than the
+/// screen, so the screen only grows, to the component-wise max of all of
+/// them. The overlay's height is also kept for its own origin.
+pub(crate) fn on_resized(app: &mut App, e: &Emitted<Resized>) {
+    let mut nav = app.resource_mut::<NavDock>();
+    let old = nav.state.screen();
+    let size = Size::new(
+        old.width.max(e.event.size.width),
+        old.height.max(e.event.size.height),
+    );
+    nav.state.set_screen(size);
+    if nav.windows.overlay.is_some_and(|w| e.targets.contains(&w)) {
+        nav.overlay_height = Some(e.event.size.height);
     }
 }
 
@@ -200,7 +205,7 @@ pub(crate) fn eased_paint(anim: Duration) -> PaintAnimationSettings {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::time::{Duration, Instant};
 
     use mecha_wayland::mechanix_widgets::prelude::FontBook;
@@ -243,31 +248,37 @@ mod tests {
         t0: Instant,
     }
 
+    /// A headless app with the dock installed over five fake sections,
+    /// ticked once: only the strip is up.
+    pub(crate) fn dock_app() -> App {
+        let mut app = App::new();
+        app.add_module(LayoutModule)
+            .add_module(PaintModule)
+            .add_module(WindowModule)
+            .add_module(AnimationModule)
+            .add_module(MechanixTheme::dark())
+            .insert_resource(Atlas::new());
+        // PresentationModule registers Role; it needs a live compositor.
+        app.register_component::<Role>();
+        let font = app
+            .resource_mut::<Atlas>()
+            .add_font(GEIST_MONO_BYTES)
+            .expect("GeistMono loads");
+        app.insert_resource(FontBook::new(font));
+
+        let mut module = NavDockModule::new(NavDockConfig::default());
+        for id in IDS {
+            module = module.section(Fake(id));
+        }
+        app.add_module(module);
+        app.tick();
+        app
+    }
+
     impl Rig {
         fn new() -> Self {
-            let mut app = App::new();
-            app.add_module(LayoutModule)
-                .add_module(PaintModule)
-                .add_module(WindowModule)
-                .add_module(AnimationModule)
-                .add_module(MechanixTheme::dark())
-                .insert_resource(Atlas::new());
-            // PresentationModule registers Role; it needs a live compositor.
-            app.register_component::<Role>();
-            let font = app
-                .resource_mut::<Atlas>()
-                .add_font(GEIST_MONO_BYTES)
-                .expect("GeistMono loads");
-            app.insert_resource(FontBook::new(font));
-
-            let mut module = NavDockModule::new(NavDockConfig::default());
-            for id in IDS {
-                module = module.section(Fake(id));
-            }
-            app.add_module(module);
-            app.tick();
             Self {
-                app,
+                app: dock_app(),
                 t0: Instant::now(),
             }
         }

@@ -5,8 +5,9 @@ use mecha_wayland::prelude::*;
 use nav_dock_api::Section;
 
 use crate::config::NavDockConfig;
+use crate::input::on_contact;
 use crate::state::NavState;
-use crate::windows::{NavDock, WindowSet, on_overlay_resized, reconcile};
+use crate::windows::{NavDock, WindowSet, on_resized, reconcile};
 
 /// Atlas master size of a dock icon, in px.
 const ICON_PX: u32 = 24;
@@ -60,8 +61,10 @@ impl Module for NavDockModule {
             sections: self.sections,
             icons,
             windows: WindowSet::default(),
+            overlay_height: None,
+            pressed: Vec::new(),
         });
-        app.system(on_overlay_resized);
+        app.system(on_resized).system(on_contact);
         reconcile(app);
     }
 }
