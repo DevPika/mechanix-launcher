@@ -5,6 +5,7 @@ mod config;
 mod dock;
 mod input;
 mod module;
+mod motion;
 mod overlay;
 mod state;
 mod strip;

@@ -83,7 +83,7 @@ pub(crate) fn hit(nav: &NavDock, window: NodeId, pos: Point) -> Option<Surface> 
         return None;
     }
     let config = nav.state.config();
-    let size = Size::new(nav.state.screen().width, overlay_height(nav));
+    let size = nav.overlay_size();
     let surface = match Look::of(nav.state.view().mode) {
         Some((Look::Expanded, _)) => Look::Expanded
             .target_rect(config, size)

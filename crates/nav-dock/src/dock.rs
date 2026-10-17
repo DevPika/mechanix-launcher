@@ -68,11 +68,15 @@ impl Look {
     }
 }
 
-/// Show `look`, emphasising section `focus`. Emitted at the morph node.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Show `look`, emphasising section `focus` (keep the current ones when
+/// `None`), with the bottom edge `bottom` above an overlay of `overlay`
+/// size, reached under `settings`. Emitted at the morph node.
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct MorphUpdate {
-    pub look: Look,
-    pub focus: usize,
+    pub look: Option<(Look, usize)>,
+    pub bottom: f32,
+    pub overlay: Size,
+    pub settings: LayoutAnimationSettings,
 }
 impl Event for MorphUpdate {}
 
@@ -94,6 +98,10 @@ pub(crate) struct DockMorph {
     config: NavDockConfig,
     look: Look,
     focus: usize,
+    /// Height of the bottom edge above the overlay's.
+    bottom: f32,
+    /// The overlay size `bottom` was set for: a resize re-applies it.
+    overlay: Option<Size>,
 }
 
 #[derive(Clone, Copy)]
@@ -115,6 +123,7 @@ pub(crate) struct DockMorphBuilder {
     pub(crate) config: NavDockConfig,
     pub(crate) look: Look,
     pub(crate) focus: usize,
+    pub(crate) bottom: f32,
 }
 
 impl Build for DockMorphBuilder {
@@ -125,7 +134,7 @@ impl Widget for DockMorph {
     type Builder = DockMorphBuilder;
 
     fn build(b: DockMorphBuilder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-        *s.component_mut::<LayoutStyle>(me).unwrap() = pill_style(&b.config, b.look);
+        *s.component_mut::<LayoutStyle>(me).unwrap() = pill_style(&b.config, b.look, b.bottom);
         *s.component_mut::<Paint>(me).unwrap() = Paint::Quad(pill_quad(s, &b.config, b.look));
         *s.component_mut::<LayoutAnimationSettings>(me).unwrap() = eased_layout(b.config.anim);
         *s.component_mut::<PaintAnimationSettings>(me).unwrap() = eased_paint(b.config.anim);
@@ -160,12 +169,16 @@ impl Widget for DockMorph {
             .collect();
 
         s.on::<MorphUpdate>(me, |ctx, e| {
+            // Unchanged updates are skipped, so their settings cannot cut
+            // short or re-arm a running transition.
             let morph = ctx.me();
-            if (morph.look, morph.focus) == (e.look, e.focus) {
+            let (look, focus) = e.look.unwrap_or((morph.look, morph.focus));
+            let next = (look, focus, e.bottom, Some(e.overlay));
+            if (morph.look, morph.focus, morph.bottom, morph.overlay) == next {
                 return;
             }
-            morph.look = e.look;
-            morph.focus = e.focus;
+            (morph.look, morph.focus, morph.bottom, morph.overlay) = next;
+            ctx.set_layout_animation(e.settings);
             apply(ctx);
         });
         s.on_theme(me, apply);
@@ -177,17 +190,16 @@ impl Widget for DockMorph {
             config: b.config,
             look: b.look,
             focus: b.focus,
+            bottom: b.bottom,
+            overlay: None,
         }
     }
 }
 
 /// The pill's style for `look`: absolute in the overlay, horizontally
 /// centred, its bottom edge `bottom` above the overlay's.
-fn pill_style(config: &NavDockConfig, look: Look) -> LayoutStyle {
+fn pill_style(config: &NavDockConfig, look: Look, bottom: f32) -> LayoutStyle {
     let (width, height) = look.size(config);
-    // The one place the pill's height above the bottom is set; for now it
-    // rests at the look's gap.
-    let bottom = look.gap(config);
     LayoutStyle::default()
         .row()
         .align_items(Align::Center)
@@ -210,7 +222,7 @@ fn pill_quad(theme: &impl ThemeReader, config: &NavDockConfig, look: Look) -> Qu
 
 /// Writes the pill and every slot for the current look and focus.
 fn apply(ctx: &mut Context<'_, DockMorph>) {
-    let (cells, icon_side, config, look, focus) = {
+    let (cells, icon_side, config, look, focus, bottom) = {
         let m = ctx.me();
         (
             m.cells.clone(),
@@ -218,9 +230,10 @@ fn apply(ctx: &mut Context<'_, DockMorph>) {
             m.config.clone(),
             m.look,
             m.focus,
+            m.bottom,
         )
     };
-    ctx.set_style(pill_style(&config, look));
+    ctx.set_style(pill_style(&config, look, bottom));
     let quad = pill_quad(ctx, &config, look);
     ctx.set_paint(Paint::Quad(quad));
 
