@@ -482,6 +482,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nav-dock"
+version = "0.1.0"
+dependencies = [
+ "gestures",
+ "mecha-wayland",
+ "nav-dock-api",
+]
+
+[[package]]
 name = "nav-dock-api"
 version = "0.1.0"
 dependencies = [

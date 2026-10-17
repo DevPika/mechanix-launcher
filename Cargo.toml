@@ -15,6 +15,7 @@ members = [
     "crates/home",
     "crates/gestures",
     "crates/nav-dock-api",
+    "crates/nav-dock",
     "crates/favourites",
     "crates/search",
     "crates/recents",
@@ -29,6 +30,7 @@ status-bar = { path = "crates/status-bar" }
 home = { path = "crates/home" }
 gestures = { path = "crates/gestures" }
 nav-dock-api = { path = "crates/nav-dock-api" }
+nav-dock = { path = "crates/nav-dock" }
 favourites = { path = "crates/favourites" }
 search = { path = "crates/search" }
 recents = { path = "crates/recents" }
