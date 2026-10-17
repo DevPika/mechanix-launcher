@@ -13,7 +13,7 @@ use std::time::Duration;
 use mecha_wayland::prelude::*;
 use nav_dock_api::Section;
 
-use crate::dock::{Look, MorphUpdate};
+use crate::dock::{Look, MorphUpdate, ScaleIcons};
 use crate::overlay::{OverlayUpdate, parts, spawn_overlay};
 use crate::state::{NavState, Surface, View};
 use crate::strip::spawn_strip;
@@ -160,6 +160,19 @@ pub(crate) fn on_resized(app: &mut App, e: &Emitted<Resized>) {
     }
 }
 
+/// On each overlay frame, after layout animation has advanced, the morph's
+/// icons are redrawn at their displayed size. The frame drawn in the same
+/// signal may still show the previous size: about one frame of lag.
+pub(crate) fn on_frame(app: &mut App, frame: &Frame) {
+    let overlay = app.resource::<NavDock>().windows.overlay;
+    if overlay != Some(frame.0) {
+        return;
+    }
+    if let Some((_, morph)) = parts(app, frame.0) {
+        app.emit(ScaleIcons, morph);
+    }
+}
+
 /// An Overlay-layer role anchored to the bottom edge only, so the
 /// compositor centres the surface horizontally. The strip.
 pub(crate) fn bottom_centre_role(namespace: &str) -> Role {
@@ -230,6 +243,10 @@ pub(crate) mod tests {
     /// A headless app with the dock installed over five fake sections,
     /// ticked once: only the strip is up.
     pub(crate) fn dock_app() -> App {
+        dock_app_with(NavDockConfig::default())
+    }
+
+    fn dock_app_with(config: NavDockConfig) -> App {
         let mut app = App::new();
         app.add_module(LayoutModule)
             .add_module(PaintModule)
@@ -245,7 +262,7 @@ pub(crate) mod tests {
             .expect("GeistMono loads");
         app.insert_resource(FontBook::new(font));
 
-        let mut module = NavDockModule::new(NavDockConfig::default());
+        let mut module = NavDockModule::new(config);
         for id in IDS {
             module = module.section(Fake(id));
         }
@@ -256,8 +273,12 @@ pub(crate) mod tests {
 
     impl Rig {
         fn new() -> Self {
+            Self::with(NavDockConfig::default())
+        }
+
+        fn with(config: NavDockConfig) -> Self {
             Self {
-                app: dock_app(),
+                app: dock_app_with(config),
                 t0: Instant::now(),
             }
         }
@@ -507,6 +528,40 @@ pub(crate) mod tests {
         assert_eq!(target(&r), Look::Expanded.target_rect(&config, size));
         r.up(50);
         assert_eq!(target(&r), Look::Bar.target_rect(&config, size));
+    }
+
+    #[test]
+    fn icons_scale_with_their_box_mid_morph() {
+        let config = NavDockConfig {
+            anim: Duration::from_secs(1),
+            ..NavDockConfig::default()
+        };
+        let mut r = Rig::with(config);
+        r.reveal();
+        r.up(50);
+        // Part way into the 1 s Expanded -> Bar morph.
+        std::thread::sleep(Duration::from_millis(100));
+        r.app.signal(Frame(r.overlay()));
+        r.app.flush();
+        let slots = r.app.children(r.morph()).unwrap().to_vec();
+        for slot in slots {
+            let hl = r.app.children(slot).unwrap()[0];
+            let icon = r.app.children(hl).unwrap()[0];
+            let shown = r.app.component::<Layout>(icon).unwrap().content();
+            let Some(Paint::Monochrome(run)) = r.app.component::<Paint>(icon) else {
+                panic!("an icon paints a sprite");
+            };
+            let sprite = run[0].size;
+            assert!(
+                (sprite.width - shown.width()).abs() < 0.5
+                    && (sprite.height - shown.height()).abs() < 0.5,
+                "sprite {sprite:?} follows its box {shown:?}"
+            );
+            assert!(
+                sprite.width > 0.0 && sprite.width < 24.0,
+                "mid-morph, not at either end: {sprite:?}"
+            );
+        }
     }
 
     #[test]

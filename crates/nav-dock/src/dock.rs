@@ -76,6 +76,12 @@ pub(crate) struct MorphUpdate {
 }
 impl Event for MorphUpdate {}
 
+/// Redraw each icon's sprite at its displayed box. Emitted at the morph
+/// node on every overlay `Frame`, after layout animation has advanced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ScaleIcons;
+impl Event for ScaleIcons {}
+
 /// The dock/bar element: one equal-width slot per section, so icon `i` is
 /// centred where `NavState::icon_center_x(i)` expects it. Each slot holds
 /// the icon (in its emphasis box) and the dot; the look decides which of
@@ -163,6 +169,7 @@ impl Widget for DockMorph {
             apply(ctx);
         });
         s.on_theme(me, apply);
+        s.on::<ScaleIcons>(me, |ctx, _| scale_icons(ctx));
 
         DockMorph {
             cells,
@@ -234,9 +241,28 @@ fn apply(ctx: &mut Context<'_, DockMorph>) {
     }
 }
 
+/// Sizes every icon's sprite to its displayed box, so it shrinks and grows
+/// with the layout animation instead of drawing full size until its box
+/// is empty. `set_size` does nothing when the size is unchanged.
+fn scale_icons(ctx: &mut Context<'_, DockMorph>) {
+    let cells = ctx.me().cells.clone();
+    for cell in cells {
+        let Some(mut icon) = ctx.at(cell.icon) else {
+            continue;
+        };
+        let Some(box_) = icon.component::<Layout>().map(Layout::content) else {
+            continue;
+        };
+        let side = box_.width().min(box_.height()).max(0.0);
+        icon.set_size(Size::new(side, side));
+    }
+}
+
 /// One slot in one look. Expanded: the icon box and icon at size, the dot
 /// at 0. Bar: the other way round. Sprite paint cannot fade, so icons go
-/// and dots come through their layout size.
+/// and dots come through their layout size; an icon's sprite follows its
+/// displayed box through `ScaleIcons`, since a sprite draws at its own
+/// size whatever its box.
 struct CellLook {
     hl_style: LayoutStyle,
     hl_quad: Quad,

@@ -7,7 +7,7 @@ use nav_dock_api::Section;
 use crate::config::NavDockConfig;
 use crate::input::on_contact;
 use crate::state::NavState;
-use crate::windows::{NavDock, WindowSet, on_resized, reconcile};
+use crate::windows::{NavDock, WindowSet, on_frame, on_resized, reconcile};
 
 /// Atlas master size of a dock icon, in px.
 const ICON_PX: u32 = 24;
@@ -64,7 +64,7 @@ impl Module for NavDockModule {
             overlay_height: None,
             pressed: Vec::new(),
         });
-        app.system(on_resized).system(on_contact);
+        app.system(on_resized).system(on_contact).system(on_frame);
         reconcile(app);
     }
 }
