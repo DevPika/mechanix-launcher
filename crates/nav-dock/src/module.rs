@@ -57,6 +57,7 @@ impl Module for NavDockModule {
         let (width, height) = self.config.fallback_screen;
         let state = NavState::new(self.config, &ids, Size::new(width, height));
         app.insert_resource(NavDock {
+            unresolved: None,
             state,
             sections: self.sections,
             icons,

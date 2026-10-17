@@ -37,6 +37,10 @@ pub(crate) struct NavDock {
     /// The axis the last held contact dragged the row or morph along, for
     /// its release's throw; `None` when it moved nothing.
     pub(crate) throw_axis: Option<Axis>,
+    /// An overlay spawned at its hidden position whose first layout has not
+    /// resolved yet. The framework snaps a node's first layout, so the real
+    /// targets are only pushed once it has, and the page slides in.
+    pub(crate) unresolved: Option<NodeId>,
 }
 impl Resource for NavDock {}
 
@@ -137,10 +141,26 @@ pub(crate) fn reconcile(app: &mut App) {
     }
     for kind in Kind::ALL {
         if wanted(view, kind) && set.slot(kind).is_none() {
-            *set.slot(kind) = Some(spawn(app, kind, view));
+            let window = spawn(app, kind, view);
+            *set.slot(kind) = Some(window);
+            if kind == Kind::Overlay {
+                app.resource_mut::<NavDock>().unresolved = Some(window);
+            }
         }
     }
     app.resource_mut::<NavDock>().windows = set;
+
+    // A fresh overlay keeps its hidden spawn position until it has laid out.
+    if let Some(window) = app.resource::<NavDock>().unresolved {
+        let resolved = parts(app, window).is_some_and(|(row, _)| {
+            app.component::<ComputedLayout>(row)
+                .is_some_and(|c| c.rect.size.width > 0.0)
+        });
+        if app.is_live(window) && !resolved {
+            return;
+        }
+        app.resource_mut::<NavDock>().unresolved = None;
+    }
 
     let distance = travel_of(app, view, set.overlay);
     let (row, morph) = app
@@ -254,7 +274,13 @@ fn spawn(app: &mut App, kind: Kind, view: View) -> NodeId {
         Kind::Strip => spawn_strip(app, &config),
         Kind::Overlay => {
             let look = Look::of(view.mode).expect("overlay is only wanted while shown");
-            let targets = motion::targets(&view, &config, size);
+            // Spawned below the screen, at its hidden position: the first
+            // layout is snapped, and the real targets then animate from it.
+            let targets = motion::Targets {
+                row_top: size.height,
+                morph_bottom: -(config.dock_size.1.max(config.bar_size.1) + config.bar_bottom_gap),
+                ..motion::targets(&view, &config, size)
+            };
             // `spawn_page` needs the whole app, so the sections step out
             // of the resource while their pages are built.
             let sections = std::mem::take(&mut app.resource_mut::<NavDock>().sections);
@@ -300,6 +326,9 @@ pub(crate) fn on_frame(app: &mut App, frame: &Frame) {
     let overlay = app.resource::<NavDock>().windows.overlay;
     if overlay != Some(frame.0) {
         return;
+    }
+    if app.resource::<NavDock>().unresolved == overlay {
+        reconcile(app);
     }
     if let Some((_, morph)) = parts(app, frame.0) {
         app.emit(ScaleIcons, morph);
@@ -899,6 +928,8 @@ pub(crate) mod tests {
         let size = Size::new(612.0, 1324.0);
         r.app.emit(Resized { size }, overlay);
         r.app.tick();
+        r.frame();
+        r.app.tick();
         r.handle(DockEvent::Cancel);
         let row = r.row();
         let config = NavDockConfig::default();
@@ -914,6 +945,27 @@ pub(crate) mod tests {
         r.finish_exit();
         assert!(!r.app.is_live(overlay));
         assert_eq!(r.namespaces(), vec![STRIP]);
+    }
+
+    #[test]
+    fn reveal_slides_the_row_up_from_below() {
+        let mut r = Rig::new();
+        r.reveal();
+        r.app.tick();
+        r.frame();
+        r.app.tick();
+        let height = r.app.resource::<NavDock>().overlay_size().height;
+        let row = r.row();
+        let shown = r.app.component::<Layout>(row).unwrap().rect;
+        assert_eq!(
+            shown.y(),
+            height,
+            "first resolved layout is below the screen"
+        );
+        let target = r.app.component::<ComputedLayout>(row).unwrap().rect;
+        assert_eq!(target.y(), 0.0);
+        let anim = format!("{:?}", eased_layout(NavDockConfig::default().anim));
+        assert_eq!(r.settings_of(row), anim);
     }
 
     #[test]
@@ -966,12 +1018,15 @@ pub(crate) mod tests {
         let mut r = Rig::new();
         r.down(Surface::Strip, 306.0, 1350.0, 0);
         r.mv(306.0, 1340.0, 16);
+        // The overlay slides up from below once its first layout resolved.
+        r.app.tick();
+        r.frame();
         r.mv(306.0, 1200.0, 32);
-        for node in [r.row(), r.morph()] {
-            let shown = r.app.component::<Layout>(node).unwrap().rect;
-            let target = r.app.component::<ComputedLayout>(node).unwrap().rect;
-            assert_eq!(shown, target, "follows the finger exactly");
-        }
+        r.app.tick();
+        let morph = r.morph();
+        let shown = r.app.component::<Layout>(morph).unwrap().rect;
+        let target = r.app.component::<ComputedLayout>(morph).unwrap().rect;
+        assert_eq!(shown, target, "the dock follows the finger exactly");
         let row = r.app.component::<ComputedLayout>(r.row()).unwrap().rect;
         assert_eq!(row.y(), 0.0, "the row targets fully up on its own");
     }
