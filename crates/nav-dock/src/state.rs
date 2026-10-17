@@ -58,6 +58,11 @@ pub struct View {
     /// Upward travel since Down (>= 0) while a drag that began on the strip
     /// is held; `None` otherwise, bar drags included.
     pub reveal_travel: Option<f32>,
+    /// Upward travel since Down (>= 0) while a drag that began on the bar is
+    /// held; `None` otherwise.
+    pub lift: Option<f32>,
+    /// The page the bar drag started on, valid while `lift` is Some.
+    pub lift_page: usize,
     /// The most recent release of a gesture.
     pub release: Option<Release>,
     /// How the overlay left, set when the mode becomes Hidden and cleared by
@@ -176,6 +181,16 @@ impl NavState {
             .gesture
             .as_ref()
             .map_or((0.0, 0.0), Gesture::overlay_offset);
+        let (lift, lift_page) = match self.gesture.as_ref() {
+            Some(g) => match g.kind {
+                Kind::Drag {
+                    from: Mode::Idle { active } | Mode::Minimized { active },
+                    ..
+                } => (Some((g.start.y - g.last.y).max(0.0)), active),
+                _ => (None, 0),
+            },
+            None => (None, 0),
+        };
         View {
             mode: self.mode,
             strip: self.mode == Mode::Hidden,
@@ -196,6 +211,8 @@ impl NavState {
                 );
                 from_strip.then(|| (g.start.y - g.last.y).max(0.0))
             }),
+            lift,
+            lift_page,
             release: self.release,
             exit: self.exit,
             last_page: self.last_page,
@@ -859,6 +876,30 @@ mod tests {
         b.down(Surface::Bar, 306.0, BAR_Y, 3000);
         b.mv(400.0, BAR_Y, 3008);
         assert_eq!(b.s.view().reveal_travel, None);
+    }
+
+    #[test]
+    fn bar_drag_reports_lift() {
+        let mut r = Rig::minimized(1);
+        assert_eq!(r.s.view().lift, None);
+        r.down(Surface::Bar, 306.0, BAR_Y, 3000);
+        r.mv(306.0, BAR_Y - 40.0, 3008);
+        assert_eq!(r.s.view().lift, Some(40.0));
+        r.mv(306.0, BAR_Y - 200.0, 3016);
+        assert_eq!(r.s.view().lift, Some(200.0));
+        assert_eq!(r.s.view().lift_page, 1);
+        r.mv(306.0, BAR_Y + 20.0, 3024);
+        assert_eq!(r.s.view().lift, Some(0.0));
+        r.up(3030);
+        assert_eq!(r.s.view().lift, None);
+    }
+
+    #[test]
+    fn strip_drag_has_no_lift() {
+        let mut r = Rig::new();
+        r.down(Surface::Strip, 306.0, 1350.0, 0);
+        r.mv(306.0, 1200.0, 16);
+        assert_eq!(r.s.view().lift, None);
     }
 
     #[test]

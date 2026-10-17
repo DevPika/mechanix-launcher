@@ -16,7 +16,7 @@ use nav_dock_api::Section;
 
 use crate::dock::{Look, MorphUpdate, ScaleIcons};
 use crate::motion;
-use crate::overlay::{OverlayUpdate, parts, spawn_overlay};
+use crate::overlay::{parts, spawn_overlay, OverlayUpdate};
 use crate::state::{Mode, NavState, Surface, View};
 use crate::strip::spawn_strip;
 
@@ -82,6 +82,7 @@ impl NavDock {
                 Surface::Strip => None,
                 Surface::Overlay if dx != 0.0 => Some(Axis::Horizontal),
                 Surface::Overlay if dy != 0.0 => Some(Axis::Vertical),
+                Surface::Bar if view.lift.is_some() => Some(Axis::Vertical),
                 Surface::Overlay | Surface::Bar | Surface::Dock => None,
             };
         }
@@ -1089,6 +1090,63 @@ pub(crate) mod tests {
         r.mv(306.0, 650.0, 1016);
         r.mv(306.0, 700.0, 1032);
         r.up(1040);
+        let row = r.settings_of(r.row());
+        assert!(row.contains("Speed("), "thrown: {row}");
+    }
+
+    impl Rig {
+        /// From the committed bar, a bar drag up 300 px; `flick` ends it fast.
+        fn bar_lift(&mut self, flick: bool) {
+            self.reveal();
+            self.up(50);
+            self.down(Surface::Bar, 306.0, 1346.0, 1000);
+            let mut y = 1346.0;
+            let mut t = 1000;
+            for _ in 0..10 {
+                y -= 30.0;
+                t += if flick { 8 } else { 200 };
+                self.mv(306.0, y, t);
+            }
+            self.up(t + if flick { 4 } else { 600 });
+        }
+    }
+
+    #[test]
+    fn bar_flick_throws_the_lifted_page_off_the_top() {
+        let mut r = Rig::new();
+        r.bar_lift(true);
+        let view = r.app.resource::<NavDock>().state.view();
+        assert_eq!(view.exit, Some(crate::state::Exit::Up));
+        let target = r.app.component::<ComputedLayout>(r.row()).unwrap().rect;
+        let height = r.app.resource::<NavDock>().laid_out_size(&r.app).height;
+        assert_eq!(target.y(), -height);
+        let row = r.settings_of(r.row());
+        assert!(row.contains("Speed("), "thrown: {row}");
+        let speed: f32 = row
+            .split("Speed(")
+            .nth(1)
+            .unwrap()
+            .split(')')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let config = NavDockConfig::default();
+        let distance = height - 300.0;
+        assert!(
+            speed >= distance / config.max_throw_time.as_secs_f32() - 1e-3,
+            "{speed}"
+        );
+    }
+
+    #[test]
+    fn bar_drag_release_without_flick_settles_page_back() {
+        let mut r = Rig::new();
+        r.bar_lift(false);
+        let view = r.app.resource::<NavDock>().state.view();
+        assert_eq!(view.exit, None);
+        let target = r.app.component::<ComputedLayout>(r.row()).unwrap().rect;
+        assert_eq!(target.y(), 0.0);
         let row = r.settings_of(r.row());
         assert!(row.contains("Speed("), "thrown: {row}");
     }

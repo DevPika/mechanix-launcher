@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use gestures::{Axis, throw_speed};
+use gestures::{throw_speed, Axis};
 use mecha_wayland::prelude::*;
 
 use crate::config::NavDockConfig;
@@ -35,6 +35,10 @@ pub(crate) fn targets(view: &View, config: &NavDockConfig, overlay: Size) -> Tar
         .overlay
         .map_or((view.last_page, 0.0, 0.0), |o| (o.page, o.dx, o.dy));
     let (row_top, morph_bottom) = match (view.mode, view.reveal_travel) {
+        // A bar drag lifts the open page 1:1; the dock looks as usual.
+        (Mode::Dragging { .. }, None) if view.lift.is_some() => {
+            (px(-view.lift.unwrap_or(0.0)), config.dock_bottom_gap)
+        }
         (Mode::Hidden, _) => match view.exit {
             Some(Exit::Up) => (percent(-100.0), height),
             // Below the edge in either look: the pill may still be expanded.
@@ -52,6 +56,13 @@ pub(crate) fn targets(view: &View, config: &NavDockConfig, overlay: Size) -> Tar
         (Mode::Dragging { .. }, None) => (percent(0.0), config.dock_bottom_gap),
         (Mode::Idle { .. }, None) => (rest_or_px(0.0, height, dy), config.dock_bottom_gap - dy),
         (Mode::Minimized { .. }, None) => (rest_or_px(0.0, height, dy), config.bar_bottom_gap - dy),
+    };
+    // While lifting, the row stays on the page the drag started on: its
+    // top is finger-coupled, so its left cannot ease to a new hover page.
+    let page = if view.lift.is_some() && view.mode != Mode::Hidden {
+        view.lift_page
+    } else {
+        page
     };
     Targets {
         row_left: rest_or_px(-100.0 * page as f32, width, dx),
@@ -104,7 +115,7 @@ pub(crate) fn coupled(view: &View) -> bool {
 /// Whether a held finger moves the row: a coupled contact but the strip's,
 /// whose row slides up on its own while only the dock follows the finger.
 pub(crate) fn row_coupled(view: &View) -> bool {
-    coupled(view) && view.held_surface != Some(Surface::Strip)
+    view.lift.is_some() || (coupled(view) && view.held_surface != Some(Surface::Strip))
 }
 
 /// The throw for `view.release` when it is newer than `prev_release_seq`
@@ -191,6 +202,8 @@ mod tests {
             }),
             held_surface: None,
             reveal_travel: None,
+            lift: None,
+            lift_page: 0,
             release: None,
             exit: None,
             last_page: 0,
@@ -223,6 +236,28 @@ mod tests {
             release: Some(Release { seq: 3, vx, vy }),
             ..view(Mode::Minimized { active: 2 })
         }
+    }
+
+    #[test]
+    fn lift_raises_the_row_one_to_one() {
+        let config = NavDockConfig::default();
+        let v = View {
+            held_surface: Some(Surface::Bar),
+            lift: Some(200.0),
+            lift_page: 1,
+            ..view(Mode::Dragging { hover: 3 })
+        };
+        let t = at(v);
+        assert_eq!(t.row_top, px(-200.0));
+        assert_eq!(t.row_left, percent(-100.0), "stays on the start page");
+        same(
+            settings(&v, 0, V, 0.0, &config),
+            eased_layout(Duration::ZERO),
+        );
+        same(
+            morph_settings(&v, 0, V, 0.0, &config),
+            eased_layout(config.anim),
+        );
     }
 
     #[test]
