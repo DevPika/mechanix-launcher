@@ -1,7 +1,6 @@
 //! `NavDockModule`: the sections, their icons, the `NavDock` resource and
 //! the first reconcile, which puts up the strip.
 
-use gestures::Axis;
 use mecha_wayland::prelude::*;
 use nav_dock_api::Section;
 
@@ -65,7 +64,9 @@ impl Module for NavDockModule {
             overlay_height: None,
             pressed: Vec::new(),
             applied_release: 0,
-            throw_axis: Axis::Vertical,
+            throw_axis: None,
+            glide: None,
+            pushed_page: None,
         });
         app.system(on_resized).system(on_contact).system(on_frame);
         reconcile(app);

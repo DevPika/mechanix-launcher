@@ -10,9 +10,10 @@ use crate::windows::{eased_layout, eased_paint};
 
 /// Alpha of the expanded pill's `SurfaceContainerHighest` fill.
 const PILL_ALPHA: f32 = 0.2;
-/// Side of the box behind a plain icon, and behind the emphasised one.
+/// Side of the box behind an icon. Emphasis is only the box's fill, which
+/// fades through paint animation: a size change would snap while a finger
+/// holds the morph.
 const ICON_BOX: f32 = 44.0;
-const ICON_BOX_EMPHASIS: f32 = 56.0;
 /// Alpha of the `Primary` box behind the emphasised icon.
 const EMPHASIS_ALPHA: f32 = 0.24;
 /// Diameter of a bar dot.
@@ -323,7 +324,7 @@ impl IconLook {
         let primary = theme.color(ColorRole::Primary);
         if emphasised {
             Self {
-                side: ICON_BOX_EMPHASIS,
+                side: ICON_BOX,
                 fill: primary.with_alpha(EMPHASIS_ALPHA),
                 tint: primary,
             }
