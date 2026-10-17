@@ -36,14 +36,8 @@ impl Widget for StatusBar {
             .padding(Insets::symmetric(px(20.0), px(8.0)))
             .justify(Justify::SpaceBetween);
 
-        // Themed background
-        let bg = s.color(ColorRole::SurfaceContainer);
-        *s.component_mut::<Paint>(me).unwrap() = Paint::Quad(Quad::new(bg));
-
-        s.on_theme(me, move |ctx| {
-            let bg = ctx.color(ColorRole::SurfaceContainer);
-            ctx.set_paint(Paint::Quad(Quad::new(bg)));
-        });
+        // Pitch black background
+        *s.component_mut::<Paint>(me).unwrap() = Paint::Quad(Quad::new(Color::BLACK));
 
         // Left cluster container: flex row with gap between items (e.g. [glyph] [clock])
         let left_cluster = s.spawn(

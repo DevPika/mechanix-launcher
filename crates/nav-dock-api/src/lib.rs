@@ -45,12 +45,7 @@ impl Widget for PlaceholderPage {
             .width(percent(100.0))
             .height(percent(100.0));
 
-        let bg = s.color(ColorRole::Surface);
-        *s.component_mut::<Paint>(me).unwrap() = Paint::Quad(Quad::new(bg));
-        s.on_theme(me, move |ctx| {
-            let bg = ctx.color(ColorRole::Surface);
-            ctx.set_paint(Paint::Quad(Quad::new(bg)));
-        });
+        *s.component_mut::<Paint>(me).unwrap() = Paint::Quad(Quad::new(Color::BLACK));
 
         s.spawn(
             me,
