@@ -16,14 +16,19 @@ use crate::windows::eased_layout;
 
 /// Target positions in the overlay's coordinates: the page row's left and
 /// top edges, and the morph's bottom edge above the overlay's bottom.
+///
+/// The row's edges are percentages of the window while they rest or exit,
+/// so they always match the real window, and px only while a finger offsets
+/// them (Taffy cannot add a percentage to px).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Targets {
-    pub(crate) row_left: f32,
-    pub(crate) row_top: f32,
+    pub(crate) row_left: Val,
+    pub(crate) row_top: Val,
     pub(crate) morph_bottom: f32,
 }
 
-/// The targets for `view` in an overlay of `overlay` size.
+/// The targets for `view` in an overlay of `overlay` size, which only the
+/// finger-coupled px values and the morph depend on.
 pub(crate) fn targets(view: &View, config: &NavDockConfig, overlay: Size) -> Targets {
     let (width, height) = (overlay.width, overlay.height);
     let (page, dx, dy) = view
@@ -31,10 +36,10 @@ pub(crate) fn targets(view: &View, config: &NavDockConfig, overlay: Size) -> Tar
         .map_or((view.last_page, 0.0, 0.0), |o| (o.page, o.dx, o.dy));
     let (row_top, morph_bottom) = match (view.mode, view.reveal_travel) {
         (Mode::Hidden, _) => match view.exit {
-            Some(Exit::Up) => (-height, height),
+            Some(Exit::Up) => (percent(-100.0), height),
             // Below the edge in either look: the pill may still be expanded.
             Some(Exit::Down) | None => (
-                height,
+                percent(100.0),
                 -(config.dock_size.1.max(config.bar_size.1) + config.bar_bottom_gap),
             ),
         },
@@ -42,29 +47,50 @@ pub(crate) fn targets(view: &View, config: &NavDockConfig, overlay: Size) -> Tar
             let dock_height = config.dock_size.1;
             let rest = dock_height + config.dock_bottom_gap;
             let risen = travel.min(rest) + (travel - rest).max(0.0) * config.dock_rubber;
-            (
-                0.0,
-                -dock_height + risen,
-            )
+            (percent(0.0), -dock_height + risen)
         }
-        (Mode::Dragging { .. }, None) => (0.0, config.dock_bottom_gap),
-        (Mode::Idle { .. }, None) => (dy, config.dock_bottom_gap - dy),
-        (Mode::Minimized { .. }, None) => (dy, config.bar_bottom_gap - dy),
+        (Mode::Dragging { .. }, None) => (percent(0.0), config.dock_bottom_gap),
+        (Mode::Idle { .. }, None) => (rest_or_px(0.0, height, dy), config.dock_bottom_gap - dy),
+        (Mode::Minimized { .. }, None) => (rest_or_px(0.0, height, dy), config.bar_bottom_gap - dy),
     };
     Targets {
-        row_left: -(page as f32 * width) + dx,
+        row_left: rest_or_px(-100.0 * page as f32, width, dx),
         row_top,
         morph_bottom,
     }
 }
 
+/// `rest` percent of a window side of `extent` px, moved by the finger's
+/// `d` px: a percentage while `d` is zero, px once it is not.
+fn rest_or_px(rest: f32, extent: f32, d: f32) -> Val {
+    if d == 0.0 {
+        percent(rest)
+    } else {
+        px(rest / 100.0 * extent + d)
+    }
+}
+
+/// `val` in px of an `extent` long window side.
+pub(crate) fn resolve(val: Val, extent: f32) -> f32 {
+    match val {
+        Val::Px(v) => v,
+        Val::Percent(p) => p / 100.0 * extent,
+        Val::Auto => 0.0,
+    }
+}
+
 /// The largest absolute delta between the displayed row position
-/// `row_xy`, the displayed morph bottom `morph_bottom` and `targets`: how
-/// far the farthest edge has to travel.
-pub(crate) fn travel(targets: Targets, row_xy: (f32, f32), morph_bottom: f32) -> f32 {
-    (targets.row_left - row_xy.0)
+/// `row_xy`, the displayed morph bottom `morph_bottom` and `targets` in an
+/// `overlay`: how far the farthest edge has to travel.
+pub(crate) fn travel(
+    targets: Targets,
+    row_xy: (f32, f32),
+    morph_bottom: f32,
+    overlay: Size,
+) -> f32 {
+    (resolve(targets.row_left, overlay.width) - row_xy.0)
         .abs()
-        .max((targets.row_top - row_xy.1).abs())
+        .max((resolve(targets.row_top, overlay.height) - row_xy.1).abs())
         .max((targets.morph_bottom - morph_bottom).abs())
 }
 
@@ -202,9 +228,13 @@ mod tests {
     #[test]
     fn reveal_moves_only_the_morph_with_finger() {
         let t = at(strip_drag(150.0));
-        assert_eq!(t.row_top, 0.0, "the row is fully up from the first pixel");
-        assert_eq!(at(strip_drag(1.0)).row_top, 0.0);
-        assert_eq!(t.row_left, -2.0 * 612.0);
+        assert_eq!(
+            t.row_top,
+            percent(0.0),
+            "the row is fully up from the first pixel"
+        );
+        assert_eq!(at(strip_drag(1.0)).row_top, percent(0.0));
+        assert_eq!(t.row_left, percent(-200.0));
         // Past the rest point (73 + 26) the dock resists: 26 + 51 * 0.3.
         assert!((t.morph_bottom - 41.3).abs() < 1e-3, "{}", t.morph_bottom);
         assert_eq!(at(strip_drag(99.0)).morph_bottom, 26.0, "at rest");
@@ -216,7 +246,7 @@ mod tests {
     fn strip_drag_row_slides_up_on_anim_while_dock_follows() {
         let config = NavDockConfig::default();
         let v = strip_drag(50.0);
-        assert_eq!(at(v).row_top, 0.0);
+        assert_eq!(at(v).row_top, percent(0.0));
         assert_eq!(at(v).morph_bottom, -23.0, "the dock follows travel");
         same(settings(&v, 0, V, 0.0, &config), eased_layout(config.anim));
         same(
@@ -243,8 +273,12 @@ mod tests {
     fn rest_targets_without_travel() {
         for mode in [Mode::Dragging { hover: 1 }, Mode::Idle { active: 1 }] {
             let t = at(view(mode));
-            assert_eq!((t.row_top, t.morph_bottom), (0.0, 26.0), "{mode:?}");
-            assert_eq!(t.row_left, -612.0);
+            assert_eq!(
+                (t.row_top, t.morph_bottom),
+                (percent(0.0), 26.0),
+                "{mode:?}"
+            );
+            assert_eq!(t.row_left, percent(-100.0));
         }
     }
 
@@ -257,8 +291,12 @@ mod tests {
             dy: 30.0,
         });
         let t = at(v);
-        assert_eq!(t.row_left, -3.0 * 612.0 - 40.0);
-        assert_eq!(t.row_top, 30.0);
+        assert_eq!(
+            t.row_left,
+            px(-3.0 * 612.0 - 40.0),
+            "px while a finger offsets it"
+        );
+        assert_eq!(t.row_top, px(30.0));
         assert_eq!(t.morph_bottom, 8.0 - 30.0);
     }
 
@@ -270,9 +308,9 @@ mod tests {
             ..view(Mode::Hidden)
         };
         let t = at(v);
-        assert_eq!(t.row_top, -1324.0);
+        assert_eq!(t.row_top, percent(-100.0));
         assert_eq!(t.morph_bottom, 1324.0);
-        assert_eq!(t.row_left, -4.0 * 612.0, "stays on the last page");
+        assert_eq!(t.row_left, percent(-400.0), "stays on the last page");
     }
 
     #[test]
@@ -283,9 +321,9 @@ mod tests {
             ..view(Mode::Hidden)
         };
         let t = at(v);
-        assert_eq!(t.row_top, 1324.0);
+        assert_eq!(t.row_top, percent(100.0));
         assert_eq!(t.morph_bottom, -(73.0 + 8.0));
-        assert_eq!(t.row_left, -612.0);
+        assert_eq!(t.row_left, percent(-100.0));
     }
 
     #[test]
@@ -309,20 +347,20 @@ mod tests {
             dy: 40.0,
         });
         let t = at(v);
-        assert_eq!(t.row_top, 40.0);
+        assert_eq!(t.row_top, px(40.0));
         assert_eq!(t.morph_bottom, 26.0 - 40.0);
     }
 
     #[test]
     fn travel_is_the_largest_delta() {
         let t = Targets {
-            row_left: -612.0,
-            row_top: 0.0,
+            row_left: percent(-100.0),
+            row_top: percent(0.0),
             morph_bottom: 26.0,
         };
-        assert_eq!(travel(t, (0.0, 100.0), 26.0), 612.0);
-        assert_eq!(travel(t, (-612.0, 1324.0), -73.0), 1324.0);
-        assert_eq!(travel(t, (-612.0, 0.0), 26.0), 0.0);
+        assert_eq!(travel(t, (0.0, 100.0), 26.0, OVERLAY), 612.0);
+        assert_eq!(travel(t, (-612.0, 1324.0), -73.0, OVERLAY), 1324.0);
+        assert_eq!(travel(t, (-612.0, 0.0), 26.0, OVERLAY), 0.0);
     }
 
     const V: Option<Axis> = Some(Axis::Vertical);

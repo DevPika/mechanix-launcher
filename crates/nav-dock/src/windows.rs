@@ -52,6 +52,22 @@ impl NavDock {
         Size::new(screen.width, self.overlay_height.unwrap_or(screen.height))
     }
 
+    /// The overlay window's laid-out size, read from `ComputedLayout`; the
+    /// `Resized`-fed `overlay_size` until its first layout.
+    fn laid_out_size(&self, app: &App) -> Size {
+        let fallback = self.overlay_size();
+        self.windows
+            .overlay
+            .and_then(|w| app.component::<ComputedLayout>(w))
+            .map_or(fallback, |c| {
+                let (w, h) = (c.rect.width(), c.rect.height());
+                Size::new(
+                    if w > 0.0 { w } else { fallback.width },
+                    if h > 0.0 { h } else { fallback.height },
+                )
+            })
+    }
+
     /// The row's and the morph's animation for the targets of `view`,
     /// consuming its release.
     fn motion_settings(
@@ -179,7 +195,7 @@ fn travel_of(app: &App, view: View, overlay: Option<NodeId>) -> f32 {
         return 0.0;
     };
     let nav = app.resource::<NavDock>();
-    let size = nav.overlay_size();
+    let size = nav.laid_out_size(app);
     let targets = motion::targets(&view, nav.state.config(), size);
     let (Some(row), Some(morph)) = (app.component::<Layout>(row), app.component::<Layout>(morph))
     else {
@@ -189,6 +205,7 @@ fn travel_of(app: &App, view: View, overlay: Option<NodeId>) -> f32 {
         targets,
         (row.rect.x(), row.rect.y()),
         size.height - morph.rect.bottom(),
+        size,
     )
 }
 
@@ -203,7 +220,7 @@ fn push(
     let (overlay, size, targets) = {
         let nav = app.resource::<NavDock>();
         let size = nav.overlay_size();
-        let targets = motion::targets(&view, nav.state.config(), size);
+        let targets = motion::targets(&view, nav.state.config(), nav.laid_out_size(app));
         (nav.windows.overlay, size, targets)
     };
     let Some((row, morph)) = overlay.and_then(|o| parts(app, o)) else {
@@ -235,9 +252,10 @@ fn exiting(app: &App, view: View, window: NodeId) -> bool {
     let Some((row, morph)) = parts(app, window) else {
         return false;
     };
-    let target = {
+    let (target, size) = {
         let nav = app.resource::<NavDock>();
-        motion::targets(&view, nav.state.config(), nav.overlay_size())
+        let size = nav.laid_out_size(app);
+        (motion::targets(&view, nav.state.config(), size), size)
     };
     let settled = |node: NodeId| {
         app.component::<Layout>(node).map(|l| l.rect)
@@ -247,7 +265,8 @@ fn exiting(app: &App, view: View, window: NodeId) -> bool {
         return false;
     };
     // Until layout has resolved the exit's target, the row has not left.
-    let resolved = (computed.rect.y() - target.row_top).abs() < 0.5;
+    let top = motion::resolve(target.row_top, size.height);
+    let resolved = (computed.rect.y() - top).abs() < 0.5;
     !(resolved && settled(row) && settled(morph))
 }
 
@@ -277,14 +296,14 @@ fn spawn(app: &mut App, kind: Kind, view: View) -> NodeId {
             // Spawned below the screen, at its hidden position: the first
             // layout is snapped, and the real targets then animate from it.
             let targets = motion::Targets {
-                row_top: size.height,
+                row_top: percent(100.0),
                 morph_bottom: -(config.dock_size.1.max(config.bar_size.1) + config.bar_bottom_gap),
                 ..motion::targets(&view, &config, size)
             };
             // `spawn_page` needs the whole app, so the sections step out
             // of the resource while their pages are built.
             let sections = std::mem::take(&mut app.resource_mut::<NavDock>().sections);
-            let window = spawn_overlay(app, &config, &sections, &icons, size, targets, look);
+            let window = spawn_overlay(app, &config, &sections, &icons, targets, look);
             app.resource_mut::<NavDock>().sections = sections;
             window
         }
@@ -294,7 +313,7 @@ fn spawn(app: &mut App, kind: Kind, view: View) -> NodeId {
 /// Every window's settled size feeds the state's screen (icon centres,
 /// paging and window origins). Windows other than home are smaller than the
 /// screen, so the screen only grows, to the component-wise max of all of
-/// them. The overlay's height is also kept for its own origin. A change of
+/// them, except the width, which the overlay sets. The overlay's height is also kept for its own origin. A change of
 /// the overlay's size moves its row and morph at once: a size change never
 /// slides them.
 pub(crate) fn on_resized(app: &mut App, e: &Emitted<Resized>) {
@@ -302,12 +321,17 @@ pub(crate) fn on_resized(app: &mut App, e: &Emitted<Resized>) {
         let mut nav = app.resource_mut::<NavDock>();
         let before = nav.overlay_size();
         let old = nav.state.screen();
-        let size = Size::new(
-            old.width.max(e.event.size.width),
-            old.height.max(e.event.size.height),
-        );
-        nav.state.set_screen(size);
-        if nav.windows.overlay.is_some_and(|w| e.targets.contains(&w)) {
+        let from_overlay = nav.windows.overlay.is_some_and(|w| e.targets.contains(&w));
+        // The overlay spans the screen's width: its width is the width,
+        // not a floor that a stale larger fallback could keep above it.
+        let width = if from_overlay {
+            e.event.size.width
+        } else {
+            old.width.max(e.event.size.width)
+        };
+        nav.state
+            .set_screen(Size::new(width, old.height.max(e.event.size.height)));
+        if from_overlay {
             nav.overlay_height = Some(e.event.size.height);
         }
         (nav.state.view(), before, nav.overlay_size())
@@ -453,6 +477,27 @@ pub(crate) mod tests {
             self.app.resource_mut::<NavDock>().state.handle(ev);
             reconcile(&mut self.app);
             self.app.tick();
+            self.size_overlay();
+        }
+
+        /// A compositor sizes a fresh overlay with a `Resized`; a headless
+        /// window has no size until it is told (the screen's, as ever).
+        fn size_overlay(&mut self) {
+            let Some(overlay) = self.set().overlay else {
+                return;
+            };
+            let laid_out = |r: &Rig| {
+                r.app
+                    .component::<ComputedLayout>(overlay)
+                    .is_some_and(|c| c.rect.size.width > 0.0)
+            };
+            if !laid_out(self) {
+                let size = self.app.resource::<NavDock>().state.screen();
+                self.app.emit(Resized { size }, overlay);
+                self.app.tick();
+                reconcile(&mut self.app);
+                self.app.tick();
+            }
         }
 
         fn at(&self, ms: u64) -> Instant {
@@ -769,8 +814,42 @@ pub(crate) mod tests {
         let mut r = Rig::new();
         r.reveal();
         let style = r.app.component::<LayoutStyle>(r.row()).unwrap();
-        assert_eq!(style.inset.left, px(-2.0 * 612.0));
-        assert_eq!(style.width, px(5.0 * 612.0));
+        assert_eq!(style.inset.left, percent(-200.0));
+        assert_eq!(style.width, percent(500.0));
+        assert_eq!(style.height, percent(100.0));
+    }
+
+    #[test]
+    fn pages_fill_the_window_width() {
+        // 700 is wider than the 612 fallback, 500 narrower: the pages follow
+        // the window either way.
+        for width in [700.0_f32, 500.0] {
+            let mut r = Rig::new();
+            r.reveal();
+            let overlay = r.overlay();
+            r.app.emit(
+                Resized {
+                    size: Size::new(width, 1324.0),
+                },
+                overlay,
+            );
+            r.app.tick();
+            r.app.tick();
+            let cells = r.app.children(r.row()).unwrap().to_vec();
+            assert_eq!(cells.len(), 5);
+            for cell in cells {
+                let w = r
+                    .app
+                    .component::<ComputedLayout>(cell)
+                    .unwrap()
+                    .rect
+                    .width();
+                assert_eq!(w, width);
+            }
+            let row = r.app.component::<ComputedLayout>(r.row()).unwrap().rect;
+            assert_eq!(row.x(), -2.0 * width, "page 2 rests at -2 windows");
+            assert_eq!(r.app.resource::<NavDock>().state.screen().width, width);
+        }
     }
 
     #[test]
@@ -792,14 +871,14 @@ pub(crate) mod tests {
         );
         let row = r.row();
         let style = r.app.component::<LayoutStyle>(row).unwrap();
-        assert_eq!(style.inset.left, px(-2.0 * 700.0), "default page 2");
-        assert_eq!(style.width, px(5.0 * 700.0));
+        assert_eq!(style.inset.left, percent(-200.0), "default page 2");
+        assert_eq!(style.width, percent(500.0));
         let shown = r.app.component::<Layout>(row).unwrap().rect;
         let target = r.app.component::<ComputedLayout>(row).unwrap().rect;
         assert_eq!(shown, target, "a resize snaps, it does not slide");
         let cell = r.app.children(row).unwrap()[0];
         let cell = r.app.component::<LayoutStyle>(cell).unwrap();
-        assert_eq!((cell.width, cell.height), (px(700.0), px(1324.0)));
+        assert_eq!((cell.width, cell.height), (percent(20.0), percent(100.0)));
     }
 
     #[test]
@@ -825,7 +904,7 @@ pub(crate) mod tests {
         r.mv(306.0, 1340.0, 2016);
         let cell = r.app.children(r.row()).unwrap()[0];
         let cell = r.app.component::<LayoutStyle>(cell).unwrap();
-        assert_eq!((cell.width, cell.height), (px(612.0), px(1324.0)));
+        assert_eq!((cell.width, cell.height), (percent(20.0), percent(100.0)));
     }
 
     impl Rig {
@@ -957,10 +1036,11 @@ pub(crate) mod tests {
         let height = r.app.resource::<NavDock>().overlay_size().height;
         let row = r.row();
         let shown = r.app.component::<Layout>(row).unwrap().rect;
-        assert_eq!(
-            shown.y(),
-            height,
-            "first resolved layout is below the screen"
+        // Below the screen, a frame into the slide up at most.
+        assert!(
+            shown.y() > height - 20.0,
+            "first resolved layout is below the screen: {}",
+            shown.y()
         );
         let target = r.app.component::<ComputedLayout>(row).unwrap().rect;
         assert_eq!(target.y(), 0.0);

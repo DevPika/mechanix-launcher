@@ -11,27 +11,26 @@ use crate::motion::Targets;
 
 pub(crate) const NAMESPACE: &str = "mechanix-nav-overlay";
 
-/// New position for the row, in an overlay of `size`, reached under
-/// `settings`. Emitted at the row node.
+/// New position for the row, reached under `settings`. `size` is the
+/// overlay's, so a resize is re-applied (and snapped) even though the
+/// percentages did not change. Emitted at the row node.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct OverlayUpdate {
-    pub left: f32,
-    pub top: f32,
+    pub left: Val,
+    pub top: Val,
     pub size: Size,
     pub settings: LayoutAnimationSettings,
 }
 impl Event for OverlayUpdate {}
 
 /// Spawns the overlay window and builds every page once, each into a
-/// fixed-size cell of `size` (the screen, until the window's own
-/// `Resized` says otherwise), at `targets`. The morph, spawned after the
+/// cell as wide as the window, at `targets`. The morph, spawned after the
 /// row so it draws above it, starts in `look` emphasising `focus`.
 pub(crate) fn spawn_overlay(
     app: &mut App,
     config: &NavDockConfig,
     sections: &[Box<dyn Section>],
     icons: &[SpriteId],
-    size: Size,
     targets: Targets,
     (look, focus): (Look, usize),
 ) -> NodeId {
@@ -56,7 +55,6 @@ pub(crate) fn spawn_overlay(
     let row = app.spawn(
         win,
         OverlayRowBuilder {
-            size,
             left: targets.row_left,
             top: targets.row_top,
         },
@@ -64,13 +62,13 @@ pub(crate) fn spawn_overlay(
     let cells = sections
         .iter()
         .map(|section| {
-            let cell = app.spawn(row, div().style(cell_style(size)));
+            let cell = app.spawn(row, div().style(cell_style(sections.len())));
             section.spawn_page(app, cell.id());
             cell
         })
         .collect::<Vec<_>>();
     *app.component_mut::<LayoutStyle>(row).unwrap() =
-        row_style(size, targets.row_left, targets.row_top, cells.len());
+        row_style(targets.row_left, targets.row_top, cells.len());
     app.widget_mut::<OverlayRow>(row)
         .expect("row was just spawned")
         .cells = cells;
@@ -100,14 +98,13 @@ pub(crate) fn parts(app: &App, overlay: NodeId) -> Option<(NodeId, NodeId)> {
 pub(crate) struct OverlayRow {
     cells: Vec<Handle<Div>>,
     size: Size,
-    left: f32,
-    top: f32,
+    left: Val,
+    top: Val,
 }
 
 pub(crate) struct OverlayRowBuilder {
-    size: Size,
-    left: f32,
-    top: f32,
+    left: Val,
+    top: Val,
 }
 
 impl Build for OverlayRowBuilder {
@@ -134,39 +131,41 @@ impl Widget for OverlayRow {
 
         OverlayRow {
             cells: Vec::new(),
-            size: b.size,
+            size: Size::new(0.0, 0.0),
             left: b.left,
             top: b.top,
         }
     }
 }
 
-fn row_style(size: Size, left: f32, top: f32, cells: usize) -> LayoutStyle {
+fn row_style(left: Val, top: Val, cells: usize) -> LayoutStyle {
     let mut style = LayoutStyle::default().row().absolute();
-    style.inset = Insets::new(px(top), auto(), auto(), px(left));
-    style.width = px(size.width * cells as f32);
-    style.height = px(size.height);
+    style.inset = Insets::new(top, auto(), auto(), left);
+    style.width = percent(100.0 * cells as f32);
+    style.height = percent(100.0);
     style
 }
 
-fn cell_style(size: Size) -> LayoutStyle {
+/// A cell is `1/cells` of the row: the window's width.
+fn cell_style(cells: usize) -> LayoutStyle {
     LayoutStyle::default()
-        .size(px(size.width), px(size.height))
+        .size(percent(100.0 / cells.max(1) as f32), percent(100.0))
         .shrink(0.0)
 }
 
 /// Writes the row's animation, then its position and size, and every
-/// cell's size.
+/// cell's size (percentages, so only the cell count matters).
 fn apply(ctx: &mut Context<'_, OverlayRow>, settings: LayoutAnimationSettings) {
-    let (cells, size, left, top) = {
+    let (cells, left, top) = {
         let row = ctx.me();
-        (row.cells.clone(), row.size, row.left, row.top)
+        (row.cells.clone(), row.left, row.top)
     };
+    let count = cells.len();
     ctx.set_layout_animation(settings);
-    ctx.set_style(row_style(size, left, top, cells.len()));
+    ctx.set_style(row_style(left, top, count));
     for cell in cells {
         if let Some(mut cell) = ctx.at(cell) {
-            cell.set_style(cell_style(size));
+            cell.set_style(cell_style(count));
         }
     }
 }
