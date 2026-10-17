@@ -8,12 +8,13 @@ mecha-wayland.workspace = true
 status-bar.workspace = true
 
 [workspace]
-members = [".", "crates/status-bar"]
+members = [".", "crates/status-bar", "crates/gestures"]
 resolver = "3"
 
 [workspace.dependencies]
 mecha-wayland = { git = "https://github.com/mecha-org/mecha-wayland", branch = "dev" }
 status-bar = { path = "crates/status-bar" }
+gestures = { path = "crates/gestures" }
 
 # Local development override — assumes mecha-wayland is cloned as a sibling
 # directory: ../mecha-wayland
