@@ -1,0 +1,10 @@
+[package]
+name = "nav-dock-api"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mecha-wayland.workspace = true
+
+[dev-dependencies]
+status-bar.workspace = true
