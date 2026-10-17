@@ -12,4 +12,4 @@ mod windows;
 
 pub use config::NavDockConfig;
 pub use module::NavDockModule;
-pub use state::{DockEvent, Mode, NavState, OverlayView, Surface, View};
+pub use state::{DockEvent, Exit, Mode, NavState, OverlayView, Release, Surface, View};

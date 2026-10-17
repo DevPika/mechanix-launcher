@@ -36,6 +36,15 @@ pub struct NavDockConfig {
     /// Screen size, (width, height) in px, until a window's `Resized`
     /// reports a real one.
     pub fallback_screen: (f32, f32),
+    /// Upward finger travel from the strip at which the revealed dock is
+    /// fully in place.
+    pub reveal_full_px: f32,
+    /// Floor on the speed of a throw animation, in px/s.
+    pub min_throw_speed: f32,
+    /// Slope of the throw easing curve at t = 0 (3.0 for `EaseOutCubic`).
+    pub throw_easing_slope: f32,
+    /// Share of finger travel past the dock's rest height that it follows.
+    pub dock_rubber: f32,
 }
 
 impl Default for NavDockConfig {
@@ -61,6 +70,10 @@ impl Default for NavDockConfig {
             anim: Duration::from_millis(280),
             default_section: "recents",
             fallback_screen: (612.0, 1360.0),
+            reveal_full_px: 300.0,
+            min_throw_speed: 1500.0,
+            throw_easing_slope: 3.0,
+            dock_rubber: 0.3,
         }
     }
 }

@@ -55,6 +55,34 @@ pub struct View {
     pub overlay: Option<OverlayView>,
     /// Surface owning the live touch: must not be removed.
     pub held_surface: Option<Surface>,
+    /// Upward travel since Down (>= 0) while a drag that began on the strip
+    /// is held; `None` otherwise, bar drags included.
+    pub reveal_travel: Option<f32>,
+    /// The most recent release of a gesture.
+    pub release: Option<Release>,
+    /// How the overlay left, set when the mode becomes Hidden and cleared by
+    /// the next reveal.
+    pub exit: Option<Exit>,
+    /// The overlay page the exit started from, valid while `exit` is Some.
+    pub last_page: usize,
+}
+
+/// A finger lift, with the velocity it left at in px/ms.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Release {
+    /// Increments once per Up that ends a gesture.
+    pub seq: u64,
+    pub vx: f32,
+    pub vy: f32,
+}
+
+/// Which way the overlay left the screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Exit {
+    /// A flick up, going home.
+    Up,
+    /// A close swipe down, or a cancelled strip drag.
+    Down,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -74,6 +102,9 @@ pub struct NavState {
     mode: Mode,
     gesture: Option<Gesture>,
     velocity: VelocityTracker,
+    release: Option<Release>,
+    exit: Option<Exit>,
+    last_page: usize,
 }
 
 impl NavState {
@@ -95,6 +126,9 @@ impl NavState {
             mode: Mode::Hidden,
             gesture: None,
             velocity,
+            release: None,
+            exit: None,
+            last_page: 0,
         }
     }
 
@@ -151,6 +185,20 @@ impl NavState {
                 dy,
             }),
             held_surface: self.gesture.as_ref().map(|g| g.surface),
+            reveal_travel: self.gesture.as_ref().and_then(|g| {
+                let from_strip = matches!(
+                    g.kind,
+                    Kind::StripPending
+                        | Kind::Drag {
+                            from: Mode::Hidden,
+                            ..
+                        }
+                );
+                from_strip.then(|| (g.start.y - g.last.y).max(0.0))
+            }),
+            release: self.release,
+            exit: self.exit,
+            last_page: self.last_page,
         }
     }
 
@@ -193,6 +241,7 @@ impl NavState {
                     self.mode = Mode::Dragging {
                         hover: self.default_index,
                     };
+                    self.exit = None;
                     g.kind = Kind::Drag {
                         held: true,
                         from: Mode::Hidden,
@@ -241,9 +290,18 @@ impl NavState {
         };
         let (vx, vy) = self.velocity.velocity(t);
         let (dx, dy) = g.overlay_offset();
+        if matches!(
+            g.kind,
+            Kind::Drag { .. } | Kind::BarPending | Kind::DockTap | Kind::Overlay { .. }
+        ) {
+            let seq = self.release.map_or(0, |r| r.seq) + 1;
+            self.release = Some(Release { seq, vx, vy });
+        }
         match (g.kind, self.mode) {
             (Kind::Drag { .. }, Mode::Dragging { hover }) => {
                 self.mode = if vy < -self.config.flick_px_per_ms {
+                    self.exit = Some(Exit::Up);
+                    self.last_page = hover;
                     Mode::Hidden
                 } else {
                     Mode::Minimized { active: hover }
@@ -272,6 +330,8 @@ impl NavState {
                     }
                     Some(Axis::Vertical) => {
                         if dy > self.config.close_px {
+                            self.exit = Some(Exit::Down);
+                            self.last_page = active;
                             self.mode = Mode::Hidden;
                         }
                     }
@@ -288,6 +348,10 @@ impl NavState {
             ..
         }) = self.gesture.take()
         {
+            if let (Mode::Hidden, Mode::Dragging { hover }) = (from, self.mode) {
+                self.exit = Some(Exit::Down);
+                self.last_page = hover;
+            }
             self.mode = from;
         }
     }
@@ -711,6 +775,107 @@ mod tests {
         r.down(Surface::Overlay, 306.0, 600.0, 3000);
         r.up(3050);
         assert_eq!(r.mode(), Mode::Minimized { active: 1 });
+    }
+
+    #[test]
+    fn reveal_travel_follows_finger() {
+        let mut r = Rig::new();
+        r.down(Surface::Strip, 306.0, 1350.0, 0);
+        r.mv(306.0, 1200.0, 16);
+        assert_eq!(r.s.view().reveal_travel, Some(150.0));
+        let mut b = Rig::minimized(1);
+        b.down(Surface::Bar, 306.0, BAR_Y, 3000);
+        b.mv(400.0, BAR_Y, 3008);
+        assert_eq!(b.s.view().reveal_travel, None);
+    }
+
+    #[test]
+    fn reveal_travel_never_negative() {
+        let mut r = Rig::new();
+        r.down(Surface::Strip, 306.0, 1350.0, 0);
+        r.mv(306.0, 1200.0, 16);
+        r.mv(306.0, 1400.0, 32);
+        assert_eq!(r.s.view().reveal_travel, Some(0.0));
+    }
+
+    #[test]
+    fn release_seq_increments_once_per_up() {
+        let mut r = Rig::new();
+        r.reveal();
+        r.up(50);
+        assert_eq!(r.s.view().release.map(|x| x.seq), Some(1));
+        r.down(Surface::Bar, 306.0, BAR_Y, 1000);
+        r.up(1050);
+        assert_eq!(r.s.view().release.map(|x| x.seq), Some(2));
+        r.mv(100.0, 100.0, 1100);
+        assert_eq!(r.s.view().release.map(|x| x.seq), Some(2));
+    }
+
+    #[test]
+    fn release_carries_velocity() {
+        let mut r = Rig::new();
+        r.down(Surface::Strip, 306.0, 1350.0, 0);
+        for k in 1..=10u64 {
+            r.mv(306.0, 1350.0 - 4.0 * k as f32, 8 * k);
+        }
+        r.up(84);
+        assert!(matches!(r.mode(), Mode::Minimized { .. }));
+        assert!(r.s.view().release.unwrap().vy < 0.0);
+    }
+
+    #[test]
+    fn flick_sets_exit_up_and_last_page() {
+        let mut r = Rig::new();
+        let x = r.s.icon_center_x(2);
+        r.past_hold(x);
+        let mut y = 1290.0;
+        let mut t = 230;
+        for _ in 0..10 {
+            y -= 12.0;
+            t += 8;
+            r.mv(x, y, t);
+        }
+        r.up(t + 4);
+        let v = r.s.view();
+        assert_eq!(v.exit, Some(Exit::Up));
+        assert_eq!(v.last_page, 2);
+        assert_eq!(v.overlay, None);
+    }
+
+    #[test]
+    fn close_sets_exit_down() {
+        let mut r = Rig::minimized(3);
+        r.down(Surface::Overlay, 306.0, 600.0, 3000);
+        r.mv(306.0, 650.0, 3016);
+        r.mv(306.0, 695.0, 3032);
+        r.up(3200);
+        let v = r.s.view();
+        assert_eq!(v.mode, Mode::Hidden);
+        assert_eq!(v.exit, Some(Exit::Down));
+        assert_eq!(v.last_page, 3);
+    }
+
+    #[test]
+    fn reveal_clears_exit() {
+        let mut r = Rig::minimized(3);
+        r.down(Surface::Overlay, 306.0, 600.0, 3000);
+        r.mv(306.0, 650.0, 3016);
+        r.mv(306.0, 695.0, 3032);
+        r.up(3200);
+        assert_eq!(r.s.view().exit, Some(Exit::Down));
+        r.down(Surface::Strip, 306.0, 1350.0, 4000);
+        r.mv(306.0, 1340.0, 4016);
+        assert_eq!(r.s.view().exit, None);
+    }
+
+    #[test]
+    fn cancel_strip_drag_exits_down() {
+        let mut r = Rig::new();
+        r.reveal();
+        r.s.handle(DockEvent::Cancel);
+        let v = r.s.view();
+        assert_eq!(v.exit, Some(Exit::Down));
+        assert_eq!(v.last_page, 2);
     }
 
     #[test]
