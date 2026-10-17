@@ -152,6 +152,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "favourites"
+version = "0.1.0"
+dependencies = [
+ "mecha-wayland",
+ "nav-dock-api",
+]
+
+[[package]]
 name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -474,6 +482,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "notifications"
+version = "0.1.0"
+dependencies = [
+ "mecha-wayland",
+ "nav-dock-api",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -571,6 +587,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick-settings"
+version = "0.1.0"
+dependencies = [
+ "mecha-wayland",
+ "nav-dock-api",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.39.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -587,6 +611,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "recents"
+version = "0.1.0"
+dependencies = [
+ "mecha-wayland",
+ "nav-dock-api",
 ]
 
 [[package]]
@@ -644,6 +676,14 @@ name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
+
+[[package]]
+name = "search"
+version = "0.1.0"
+dependencies = [
+ "mecha-wayland",
+ "nav-dock-api",
+]
 
 [[package]]
 name = "serde"

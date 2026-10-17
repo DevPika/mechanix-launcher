@@ -8,7 +8,17 @@ mecha-wayland.workspace = true
 status-bar.workspace = true
 
 [workspace]
-members = [".", "crates/status-bar", "crates/gestures", "crates/nav-dock-api"]
+members = [
+    ".",
+    "crates/status-bar",
+    "crates/gestures",
+    "crates/nav-dock-api",
+    "crates/favourites",
+    "crates/search",
+    "crates/recents",
+    "crates/notifications",
+    "crates/quick-settings",
+]
 resolver = "3"
 
 [workspace.dependencies]
@@ -16,6 +26,11 @@ mecha-wayland = { git = "https://github.com/mecha-org/mecha-wayland", branch = "
 status-bar = { path = "crates/status-bar" }
 gestures = { path = "crates/gestures" }
 nav-dock-api = { path = "crates/nav-dock-api" }
+favourites = { path = "crates/favourites" }
+search = { path = "crates/search" }
+recents = { path = "crates/recents" }
+notifications = { path = "crates/notifications" }
+quick-settings = { path = "crates/quick-settings" }
 
 # Local development override — assumes mecha-wayland is cloned as a sibling
 # directory: ../mecha-wayland
