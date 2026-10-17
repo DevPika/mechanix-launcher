@@ -4,9 +4,18 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-app = { git = "https://github.com/mecha-org/mecha-wayland", branch = "dev" }
+mecha-wayland.workspace = true
+status-bar.workspace = true
+
+[workspace]
+members = [".", "crates/status-bar"]
+resolver = "3"
+
+[workspace.dependencies]
+mecha-wayland = { git = "https://github.com/mecha-org/mecha-wayland", branch = "dev" }
+status-bar = { path = "crates/status-bar" }
 
 # Local development override — assumes mecha-wayland is cloned as a sibling
 # directory: ../mecha-wayland
 [patch."https://github.com/mecha-org/mecha-wayland"]
-app = { path = "../mecha-wayland/crates/app" }
+mecha-wayland = { path = "../mecha-wayland" }
