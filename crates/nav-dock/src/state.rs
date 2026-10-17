@@ -98,6 +98,14 @@ impl NavState {
         self.screen = screen;
     }
 
+    pub fn screen(&self) -> Size {
+        self.screen
+    }
+
+    pub fn config(&self) -> &NavDockConfig {
+        &self.config
+    }
+
     /// Centre of icon `i`: `n` icons spread evenly across the dock width,
     /// the dock centred on screen.
     pub fn icon_center_x(&self, i: usize) -> f32 {

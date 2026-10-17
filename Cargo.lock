@@ -488,6 +488,7 @@ dependencies = [
  "gestures",
  "mecha-wayland",
  "nav-dock-api",
+ "status-bar",
 ]
 
 [[package]]
