@@ -8,7 +8,7 @@
 //! except the window holding the live touch, which a touch stays bound to;
 //! it goes on the first reconcile after that touch ends.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gestures::Axis;
 use mecha_wayland::prelude::*;
@@ -37,22 +37,8 @@ pub(crate) struct NavDock {
     /// The axis the last held contact dragged the row or morph along, for
     /// its release's throw; `None` when it moved nothing.
     pub(crate) throw_axis: Option<Axis>,
-    /// The row's sideways glide to a new hover page while a finger holds
-    /// it, see [`motion::glide`].
-    pub(crate) glide: Option<Glide>,
-    /// The page last pushed to the row.
-    pub(crate) pushed_page: Option<usize>,
 }
 impl Resource for NavDock {}
-
-/// A launcher-run glide of the row's `left`, since its `top` follows the
-/// finger on the same node under zero-duration layout animation.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Glide {
-    from: f32,
-    to: f32,
-    started: Instant,
-}
 
 impl NavDock {
     /// The overlay's size: the screen's width, and its last `Resized`
@@ -72,7 +58,8 @@ impl NavDock {
         if let Some(surface) = view.held_surface {
             let (dx, dy) = view.overlay.map_or((0.0, 0.0), |o| (o.dx, o.dy));
             self.throw_axis = match surface {
-                Surface::Strip => Some(Axis::Vertical),
+                // The row slides up on its own: nothing to throw.
+                Surface::Strip => None,
                 Surface::Overlay if dx != 0.0 => Some(Axis::Horizontal),
                 Surface::Overlay if dy != 0.0 => Some(Axis::Vertical),
                 Surface::Overlay | Surface::Bar | Surface::Dock => None,
@@ -160,13 +147,6 @@ pub(crate) fn reconcile(app: &mut App) {
         .resource_mut::<NavDock>()
         .motion_settings(&view, distance);
     push(app, view, row, morph);
-    // A glide steps on frames, which an unmoved layout would not request.
-    if let Some(overlay) = set
-        .overlay
-        .filter(|_| app.resource::<NavDock>().glide.is_some())
-    {
-        app.signal(RequestFrame(overlay));
-    }
 }
 
 /// How far the overlay's row and morph have to travel from where they are
@@ -193,8 +173,7 @@ fn travel_of(app: &App, view: View, overlay: Option<NodeId>) -> f32 {
 }
 
 /// Sends the overlay's row and morph their targets for `view`, reached
-/// under `row_settings` and `morph_settings`. While a finger holds the row,
-/// a change of page glides its `left`.
+/// under `row_settings` and `morph_settings`.
 fn push(
     app: &mut App,
     view: View,
@@ -210,9 +189,8 @@ fn push(
     let Some((row, morph)) = overlay.and_then(|o| parts(app, o)) else {
         return;
     };
-    let left = glided_left(app, view, row, targets.row_left);
     let update = OverlayUpdate {
-        left,
+        left: targets.row_left,
         top: targets.row_top,
         size,
         settings: row_settings,
@@ -225,38 +203,6 @@ fn push(
         settings: morph_settings,
     };
     app.emit(update, morph);
-}
-
-/// The row's `left` for `target`: the target itself, or while a finger
-/// holds the row, gliding there from where the row was shown when the page
-/// last changed.
-fn glided_left(app: &mut App, view: View, row: NodeId, target: f32) -> f32 {
-    let shown = app.component::<Layout>(row).map(|l| l.rect.x());
-    let mut nav = app.resource_mut::<NavDock>();
-    let page = view.overlay.map(|o| o.page);
-    let paged = nav.pushed_page.is_some() && page != nav.pushed_page;
-    nav.pushed_page = page;
-    if !motion::coupled(&view) {
-        nav.glide = None;
-        return target;
-    }
-    if let Some(from) = shown.filter(|&x| paged && x != target) {
-        nav.glide = Some(Glide {
-            from,
-            to: target,
-            started: Instant::now(),
-        });
-    }
-    let Some(g) = nav.glide else {
-        return target;
-    };
-    let anim = nav.state.config().anim;
-    let elapsed = g.started.elapsed();
-    if elapsed >= anim || g.to != target {
-        nav.glide = None;
-        return target;
-    }
-    motion::glide(g.from, g.to, elapsed, anim)
 }
 
 /// Whether the overlay `window` is still running the exit motion of a
@@ -348,8 +294,7 @@ pub(crate) fn on_resized(app: &mut App, e: &Emitted<Resized>) {
 
 /// On each overlay frame, after layout animation has advanced, the morph's
 /// icons are redrawn at their displayed size. The frame drawn in the same
-/// signal may still show the previous size: about one frame of lag. A
-/// running glide steps, and asks for the next frame. While the overlay runs
+/// signal may still show the previous size: about one frame of lag. While the overlay runs
 /// an exit, a reconcile then removes it once it is done.
 pub(crate) fn on_frame(app: &mut App, frame: &Frame) {
     let overlay = app.resource::<NavDock>().windows.overlay;
@@ -360,14 +305,6 @@ pub(crate) fn on_frame(app: &mut App, frame: &Frame) {
         app.emit(ScaleIcons, morph);
     }
     let view = app.resource::<NavDock>().state.view();
-    if app.resource::<NavDock>().glide.is_some() {
-        // A glide runs only while the finger holds the row: it snaps.
-        let snap = eased_layout(Duration::ZERO);
-        push(app, view, snap, snap);
-        if app.resource::<NavDock>().glide.is_some() {
-            app.signal(RequestFrame(frame.0));
-        }
-    }
     if view.mode == Mode::Hidden && view.exit.is_some() {
         reconcile(app);
     }
@@ -951,7 +888,7 @@ pub(crate) mod tests {
         let overlays = r.namespaces().iter().filter(|n| *n == OVERLAY).count();
         assert_eq!(overlays, 1);
         let target = r.app.component::<ComputedLayout>(r.row()).unwrap().rect;
-        assert!(target.y() > 0.0, "pulled back from the top: {target:?}");
+        assert_eq!(target.y(), 0.0, "pulled back from the top: {target:?}");
     }
 
     #[test]
@@ -980,37 +917,19 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn hover_change_glides_the_row_while_y_follows() {
-        let config = NavDockConfig {
-            anim: Duration::from_secs(1),
-            ..NavDockConfig::default()
-        };
-        let mut r = Rig::with(config);
+    fn hover_change_moves_the_row_on_anim() {
+        let mut r = Rig::new();
         r.reveal();
-        let from = r.app.component::<ComputedLayout>(r.row()).unwrap().rect.x();
-        assert_eq!(from, -2.0 * 612.0);
-        // Past the hold, over icon 0: the hover changes page.
         let x = r.app.resource::<NavDock>().state.icon_center_x(0);
         r.mv(x, 1290.0, 230);
         assert_eq!(
             r.app.resource::<NavDock>().state.view().mode,
             Mode::Dragging { hover: 0 }
         );
-        std::thread::sleep(Duration::from_millis(50));
-        r.frame();
-        r.app.tick();
-        let row = r.app.component::<ComputedLayout>(r.row()).unwrap().rect;
-        assert!(
-            from < row.x() && row.x() < 0.0,
-            "mid-glide between {from} and 0: {}",
-            row.x()
-        );
-        assert_eq!(
-            row.y(),
-            1360.0 * (1.0 - 60.0 / 300.0),
-            "y follows the finger"
-        );
-        assert!(r.app.resource::<NavDock>().glide.is_some(), "still gliding");
+        let anim = format!("{:?}", eased_layout(NavDockConfig::default().anim));
+        assert_eq!(r.settings_of(r.row()), anim);
+        let target = r.app.component::<ComputedLayout>(r.row()).unwrap().rect;
+        assert_eq!((target.x(), target.y()), (0.0, 0.0));
     }
 
     #[test]
@@ -1054,7 +973,7 @@ pub(crate) mod tests {
             assert_eq!(shown, target, "follows the finger exactly");
         }
         let row = r.app.component::<ComputedLayout>(r.row()).unwrap().rect;
-        assert_eq!(row.y(), 1360.0 * 0.5, "150 of 300 px: half way up");
+        assert_eq!(row.y(), 0.0, "the row targets fully up on its own");
     }
 
     #[test]

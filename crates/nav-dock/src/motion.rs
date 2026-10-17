@@ -43,7 +43,7 @@ pub(crate) fn targets(view: &View, config: &NavDockConfig, overlay: Size) -> Tar
             let rest = dock_height + config.dock_bottom_gap;
             let risen = travel.min(rest) + (travel - rest).max(0.0) * config.dock_rubber;
             (
-                height * (1.0 - (travel / config.reveal_full_px).min(1.0)),
+                0.0,
                 -dock_height + risen,
             )
         }
@@ -68,11 +68,17 @@ pub(crate) fn travel(targets: Targets, row_xy: (f32, f32), morph_bottom: f32) ->
         .max((targets.morph_bottom - morph_bottom).abs())
 }
 
-/// Whether a held finger moves the row and the morph: any held contact
+/// Whether a held finger moves the morph (and, but for the strip's, the row): any held contact
 /// but the bar's. A bar drag moves nothing with the finger, so its look
 /// change eases.
 pub(crate) fn coupled(view: &View) -> bool {
     view.held_surface.is_some_and(|s| s != Surface::Bar)
+}
+
+/// Whether a held finger moves the row: a coupled contact but the strip's,
+/// whose row slides up on its own while only the dock follows the finger.
+pub(crate) fn row_coupled(view: &View) -> bool {
+    coupled(view) && view.held_surface != Some(Surface::Strip)
 }
 
 /// The throw for `view.release` when it is newer than `prev_release_seq`
@@ -100,7 +106,7 @@ fn throw(
 }
 
 /// How the row moves to its next targets: snapped while a finger drags
-/// it, thrown at the release speed when a new release ended a drag along
+/// it (not a strip drag's), thrown at the release speed when a new release ended a drag along
 /// `axis` (at least fast enough to cover `distance` within
 /// `max_throw_time`), eased over `anim` otherwise.
 pub(crate) fn settings(
@@ -110,7 +116,7 @@ pub(crate) fn settings(
     distance: f32,
     config: &NavDockConfig,
 ) -> LayoutAnimationSettings {
-    if coupled(view) {
+    if row_coupled(view) {
         return eased_layout(Duration::ZERO);
     }
     throw(view, prev_release_seq, axis, distance, config).unwrap_or(eased_layout(config.anim))
@@ -126,20 +132,13 @@ pub(crate) fn morph_settings(
     distance: f32,
     config: &NavDockConfig,
 ) -> LayoutAnimationSettings {
-    if view.exit.is_some() || coupled(view) {
+    if coupled(view) {
+        return eased_layout(Duration::ZERO);
+    }
+    if view.exit.is_some() {
         return settings(view, prev_release_seq, axis, distance, config);
     }
     eased_layout(config.anim)
-}
-
-/// The value `elapsed` into an EaseOutCubic glide from `from` to `to` over
-/// `anim`; `to` once it is over.
-pub(crate) fn glide(from: f32, to: f32, elapsed: Duration, anim: Duration) -> f32 {
-    if elapsed >= anim {
-        return to;
-    }
-    let t = elapsed.as_secs_f32() / anim.as_secs_f32();
-    from + (to - from) * Easing::EaseOutCubic.resolve(t)
 }
 
 #[cfg(test)]
@@ -201,16 +200,38 @@ mod tests {
     }
 
     #[test]
-    fn reveal_moves_row_and_morph_with_finger() {
+    fn reveal_moves_only_the_morph_with_finger() {
         let t = at(strip_drag(150.0));
-        assert_eq!(t.row_top, 662.0);
+        assert_eq!(t.row_top, 0.0, "the row is fully up from the first pixel");
+        assert_eq!(at(strip_drag(1.0)).row_top, 0.0);
         assert_eq!(t.row_left, -2.0 * 612.0);
         // Past the rest point (73 + 26) the dock resists: 26 + 51 * 0.3.
         assert!((t.morph_bottom - 41.3).abs() < 1e-3, "{}", t.morph_bottom);
         assert_eq!(at(strip_drag(99.0)).morph_bottom, 26.0, "at rest");
         assert_eq!(at(strip_drag(50.0)).morph_bottom, -23.0);
         assert_eq!(at(strip_drag(0.0)).morph_bottom, -73.0, "below the edge");
-        assert_eq!(at(strip_drag(400.0)).row_top, 0.0, "fully up");
+    }
+
+    #[test]
+    fn strip_drag_row_slides_up_on_anim_while_dock_follows() {
+        let config = NavDockConfig::default();
+        let v = strip_drag(50.0);
+        assert_eq!(at(v).row_top, 0.0);
+        assert_eq!(at(v).morph_bottom, -23.0, "the dock follows travel");
+        same(settings(&v, 0, V, 0.0, &config), eased_layout(config.anim));
+        same(
+            morph_settings(&v, 0, V, 0.0, &config),
+            eased_layout(Duration::ZERO),
+        );
+    }
+
+    #[test]
+    fn strip_release_does_not_throw_the_row() {
+        let config = NavDockConfig::default();
+        same(
+            settings(&released(0.0, -3.0), 2, None, 0.0, &config),
+            eased_layout(config.anim),
+        );
     }
 
     #[test]
@@ -304,17 +325,6 @@ mod tests {
         assert_eq!(travel(t, (-612.0, 0.0), 26.0), 0.0);
     }
 
-    #[test]
-    fn glide_eases_from_to() {
-        let anim = Duration::from_millis(200);
-        assert_eq!(glide(0.0, -612.0, Duration::ZERO, anim), 0.0);
-        let mid = glide(0.0, -612.0, Duration::from_millis(100), anim);
-        // EaseOutCubic at t = 0.5 is 0.875.
-        assert!((mid + 612.0 * 0.875).abs() < 1e-2, "{mid}");
-        assert_eq!(glide(0.0, -612.0, anim, anim), -612.0);
-        assert_eq!(glide(0.0, -612.0, Duration::from_secs(1), anim), -612.0);
-    }
-
     const V: Option<Axis> = Some(Axis::Vertical);
 
     #[test]
@@ -322,7 +332,6 @@ mod tests {
         let config = NavDockConfig::default();
         let zero = eased_layout(Duration::ZERO);
         let v = strip_drag(150.0);
-        same(settings(&v, 0, V, 0.0, &config), zero);
         same(morph_settings(&v, 0, V, 0.0, &config), zero);
         // A held drag snaps even with an unapplied release on record.
         let mut v = released(0.0, -3.0);
