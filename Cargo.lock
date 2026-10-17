@@ -296,6 +296,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "home"
+version = "0.1.0"
+dependencies = [
+ "mecha-wayland",
+]
+
+[[package]]
 name = "imagesize"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -359,6 +366,7 @@ dependencies = [
 name = "launcher"
 version = "0.1.0"
 dependencies = [
+ "home",
  "mecha-wayland",
  "status-bar",
 ]

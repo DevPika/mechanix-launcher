@@ -1,5 +1,6 @@
 use mecha_wayland::mechanix_widgets::prelude::FontBook;
 use mecha_wayland::prelude::*;
+use home::HomeModule;
 use status_bar::{DEFAULT_ICON_SIZE, GEIST_MONO_BYTES, StatusBarModule, StatusIcons};
 
 fn main() {
@@ -39,7 +40,7 @@ fn main() {
             budget: Budget::default(),
         });
 
-    app.add_module(StatusBarModule);
+    app.add_module(HomeModule).add_module(StatusBarModule);
 
     app.run();
 }
