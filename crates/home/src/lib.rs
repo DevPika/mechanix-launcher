@@ -19,7 +19,7 @@ impl Module for HomeModule {
         });
 
         let root = app.root();
-        app.spawn_with(
+        let window = app.spawn_with(
             root,
             window()
                 .title("mechanix-home")
@@ -27,17 +27,29 @@ impl Module for HomeModule {
                 .clear(Color::BLACK),
             (role,),
         );
+        nav_dock_api::placeholder_page(app, window.id(), "Homescreen");
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mecha_wayland::mechanix_widgets::prelude::{FontBook, Text};
+    use status_bar::GEIST_MONO_BYTES;
 
     #[test]
     fn home_spawns_one_window() {
         let mut app = App::new();
-        app.add_module(LayoutModule).add_module(WindowModule);
+        app.add_module(LayoutModule)
+            .add_module(WindowModule)
+            .add_module(PaintModule)
+            .add_module(MechanixTheme::dark())
+            .insert_resource(Atlas::new());
+        let font = app
+            .resource_mut::<Atlas>()
+            .add_font(GEIST_MONO_BYTES)
+            .expect("GeistMono loads");
+        app.insert_resource(FontBook::new(font));
         // PresentationModule registers Role; it needs a live compositor.
         app.register_component::<Role>();
         app.add_module(HomeModule);
@@ -50,5 +62,11 @@ mod tests {
             Role::Layer(l) => assert_eq!(l.layer, Layer::Bottom),
             _ => panic!("expected a layer role"),
         }
+
+        let texts: Vec<_> = app
+            .descendants(ids[0])
+            .filter(|n| app.widget::<Text>(*n).is_some())
+            .collect();
+        assert_eq!(texts.len(), 1);
     }
 }

@@ -300,6 +300,8 @@ name = "home"
 version = "0.1.0"
 dependencies = [
  "mecha-wayland",
+ "nav-dock-api",
+ "status-bar",
 ]
 
 [[package]]
