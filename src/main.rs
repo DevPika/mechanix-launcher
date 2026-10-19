@@ -1,17 +1,21 @@
 use mecha_wayland::prelude::*;
 
+mod header;
 pub mod tiles;
 
+use header::{HEADER_HEIGHT, HeaderBuilder};
 use tiles::{GRID_HEIGHT, TilesBuilder};
 
 // Initial window size only; the panel fills the actual window dimensions.
 const INITIAL_WIDTH: f32 = 696.0;
 const ICON_SIZE: u32 = 32;
 const SLIDERS_HEIGHT: f32 = 203.0;
+const HEADER_SLIDER_GAP: f32 = 56.0;
+const TOP_HEIGHT: f32 = HEADER_HEIGHT + HEADER_SLIDER_GAP + SLIDERS_HEIGHT;
 const SECTION_GAP: f32 = 64.0;
-const INITIAL_HEIGHT: f32 = SLIDERS_HEIGHT + SECTION_GAP + GRID_HEIGHT;
+const INITIAL_HEIGHT: f32 = TOP_HEIGHT + SECTION_GAP + GRID_HEIGHT;
 
-const SLIDER_HEIGHT: f32 = 25.0;
+const SLIDER_HEIGHT: f32 = 40.0;
 const SLIDER_LEFT_PERCENT: f32 = 15.0;
 const SLIDER_RIGHT_PERCENT: f32 = 6.0;
 const SLIDER_TOPS: [f32; 2] = [47.0, 133.0];
@@ -42,6 +46,7 @@ struct QuickSettings;
 
 struct QuickSettingsBuilder {
     root: NodeId,
+    header: HeaderBuilder,
     tiles: TilesBuilder,
     brightness_icon: SpriteId,
     volume_icon: SpriteId,
@@ -79,9 +84,15 @@ impl Widget for QuickSettings {
             ),
         );
 
+        let top = s.spawn(
+            panel,
+            div().style(full_width(TOP_HEIGHT).column().gap(px(HEADER_SLIDER_GAP))),
+        );
+        s.spawn(top, b.header);
+
         // Static preview levels: volume first, then brightness.
         let sliders = s.spawn(
-            panel,
+            top,
             placeholder(
                 full_width(SLIDERS_HEIGHT),
                 s,
@@ -183,6 +194,7 @@ fn main() {
         root,
         QuickSettingsBuilder {
             root,
+            header: HeaderBuilder { font },
             tiles: TilesBuilder { font },
             brightness_icon,
             volume_icon,

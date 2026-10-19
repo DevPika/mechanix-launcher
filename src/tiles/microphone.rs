@@ -17,7 +17,7 @@ impl Widget for Microphone {
 
     fn build(_: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
         // Microphone artwork is not available yet.
-        let icon = build_tile(me, s, include_bytes!("../../assets/airplane.svg"));
+        let icon = build_tile(me, s, include_bytes!("../../assets/microphone.svg"));
         Microphone { icon }
     }
 }
