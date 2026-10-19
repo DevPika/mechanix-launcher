@@ -1,17 +1,15 @@
 use mecha_wayland::prelude::*;
 
-mod music_player;
 pub mod tiles;
 
-use music_player::MusicPlayerBuilder;
 use tiles::{GRID_HEIGHT, TilesBuilder};
 
 // Initial window size only; the panel fills the actual window dimensions.
 const INITIAL_WIDTH: f32 = 696.0;
-const MEDIA_HEIGHT: f32 = 167.0;
 const ICON_SIZE: u32 = 32;
 const SLIDERS_HEIGHT: f32 = 203.0;
-const INITIAL_HEIGHT: f32 = MEDIA_HEIGHT + GRID_HEIGHT + SLIDERS_HEIGHT;
+const SECTION_GAP: f32 = 64.0;
+const INITIAL_HEIGHT: f32 = SLIDERS_HEIGHT + SECTION_GAP + GRID_HEIGHT;
 
 const SLIDER_HEIGHT: f32 = 25.0;
 const SLIDER_LEFT_PERCENT: f32 = 15.0;
@@ -44,7 +42,6 @@ struct QuickSettings;
 
 struct QuickSettingsBuilder {
     root: NodeId,
-    music_player: MusicPlayerBuilder,
     tiles: TilesBuilder,
     brightness_icon: SpriteId,
     volume_icon: SpriteId,
@@ -77,15 +74,12 @@ impl Widget for QuickSettings {
                 LayoutStyle::default()
                     .fill()
                     .column()
+                    .gap(px(SECTION_GAP))
                     .justify(Justify::SpaceBetween),
             ),
         );
 
-        s.spawn(panel, b.music_player);
-
-        s.spawn(panel, b.tiles);
-
-        // Static preview levels: brightness first, then volume.
+        // Static preview levels: volume first, then brightness.
         let sliders = s.spawn(
             panel,
             placeholder(
@@ -95,8 +89,8 @@ impl Widget for QuickSettings {
             ),
         );
         for (top, (level, sprite)) in SLIDER_TOPS.into_iter().zip([
-            (BRIGHTNESS_PERCENT, b.brightness_icon),
             (VOLUME_PERCENT, b.volume_icon),
+            (BRIGHTNESS_PERCENT, b.brightness_icon),
         ]) {
             let icon_box = s.spawn(
                 sliders,
@@ -144,6 +138,8 @@ impl Widget for QuickSettings {
             );
         }
 
+        s.spawn(panel, b.tiles);
+
         QuickSettings
     }
 }
@@ -161,22 +157,6 @@ fn main() {
         &mut atlas,
         include_bytes!("../assets/speaker/speaker-high.svg"),
     );
-    let music_player = MusicPlayerBuilder {
-        font,
-        previous_icon: load_icon(
-            &mut atlas,
-            include_bytes!("../assets/music-player/skip-back.svg"),
-        ),
-        play_icon: load_icon(
-            &mut atlas,
-            include_bytes!("../assets/music-player/play.svg"),
-        ),
-        next_icon: load_icon(
-            &mut atlas,
-            include_bytes!("../assets/music-player/skip-forward.svg"),
-        ),
-    };
-
     let mut app = App::new();
     app.add_module(LayoutModule)
         .add_module(PaintModule)
@@ -203,7 +183,6 @@ fn main() {
         root,
         QuickSettingsBuilder {
             root,
-            music_player,
             tiles: TilesBuilder { font },
             brightness_icon,
             volume_icon,

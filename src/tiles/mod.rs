@@ -6,7 +6,9 @@ pub mod battery;
 pub mod bluetooth;
 pub mod camera;
 pub mod cellular;
+pub mod display;
 pub mod file_manager;
+pub mod microphone;
 pub mod record;
 pub mod rotate;
 pub mod settings;
@@ -17,7 +19,9 @@ pub use battery::{Battery, BatteryBuilder};
 pub use bluetooth::{Bluetooth, BluetoothBuilder};
 pub use camera::{Camera, CameraBuilder};
 pub use cellular::{Cellular, CellularBuilder};
+pub use display::{DisplayTile, DisplayTileBuilder};
 pub use file_manager::{FileManager, FileManagerBuilder};
+pub use microphone::{Microphone, MicrophoneBuilder};
 pub use record::{Record, RecordBuilder};
 pub use rotate::{Rotate, RotateBuilder};
 pub use settings::{Settings, SettingsBuilder};
@@ -32,14 +36,14 @@ pub const GRID_HEIGHT: f32 = TILE_HEIGHT * 2.0;
 pub struct Tiles {
     pub wifi: Handle<Wifi>,
     pub bluetooth: Handle<Bluetooth>,
-    pub rotate: Handle<Rotate>,
+    pub display: Handle<DisplayTile>,
     pub terminal: Handle<Terminal>,
-    pub file_manager: Handle<FileManager>,
-    pub cellular: Handle<Cellular>,
-    pub battery: Handle<Battery>,
+    pub microphone: Handle<Microphone>,
     pub record: Handle<Record>,
-    pub camera: Handle<Camera>,
     pub settings: Handle<Settings>,
+    pub camera: Handle<Camera>,
+    pub rotate: Handle<Rotate>,
+    pub secondary_display: Handle<DisplayTile>,
 }
 
 pub struct TilesBuilder {
@@ -71,34 +75,28 @@ impl Widget for Tiles {
                 name: "Comet".into(),
             },
         );
-        let rotate = s.spawn(top, RotateBuilder);
+        let display = s.spawn(top, DisplayTileBuilder);
         let terminal = s.spawn(top, TerminalBuilder);
-        let file_manager = s.spawn(top, FileManagerBuilder);
+        let microphone = s.spawn(top, MicrophoneBuilder);
 
         let bottom = s.spawn(me, div().style(full_width(TILE_HEIGHT).row()));
-        let cellular = s.spawn(bottom, CellularBuilder);
-        let battery = s.spawn(
-            bottom,
-            BatteryBuilder {
-                font: b.font,
-                percentage: 84,
-            },
-        );
         let record = s.spawn(bottom, RecordBuilder);
-        let camera = s.spawn(bottom, CameraBuilder);
         let settings = s.spawn(bottom, SettingsBuilder);
+        let camera = s.spawn(bottom, CameraBuilder);
+        let rotate = s.spawn(bottom, RotateBuilder);
+        let secondary_display = s.spawn(bottom, DisplayTileBuilder);
 
         Tiles {
             wifi,
             bluetooth,
-            rotate,
+            display,
             terminal,
-            file_manager,
-            cellular,
-            battery,
+            microphone,
             record,
-            camera,
             settings,
+            camera,
+            rotate,
+            secondary_display,
         }
     }
 }
