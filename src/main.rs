@@ -1,18 +1,17 @@
 use mecha_wayland::prelude::*;
 
 mod music_player;
+pub mod tiles;
 
 use music_player::MusicPlayerBuilder;
+use tiles::{GRID_HEIGHT, TilesBuilder};
 
 // Initial window size only; the panel fills the actual window dimensions.
 const INITIAL_WIDTH: f32 = 696.0;
 const MEDIA_HEIGHT: f32 = 167.0;
-const TILE_HEIGHT: f32 = 139.0;
-const TILE_COLUMNS: usize = 5;
-const TILE_ROWS: usize = 2;
 const ICON_SIZE: u32 = 32;
 const SLIDERS_HEIGHT: f32 = 203.0;
-const INITIAL_HEIGHT: f32 = MEDIA_HEIGHT + TILE_HEIGHT * TILE_ROWS as f32 + SLIDERS_HEIGHT;
+const INITIAL_HEIGHT: f32 = MEDIA_HEIGHT + GRID_HEIGHT + SLIDERS_HEIGHT;
 
 const SLIDER_HEIGHT: f32 = 25.0;
 const SLIDER_LEFT_PERCENT: f32 = 15.0;
@@ -46,7 +45,7 @@ struct QuickSettings;
 struct QuickSettingsBuilder {
     root: NodeId,
     music_player: MusicPlayerBuilder,
-    tile_icons: [SpriteId; TILE_COLUMNS * TILE_ROWS],
+    tiles: TilesBuilder,
     brightness_icon: SpriteId,
     volume_icon: SpriteId,
 }
@@ -84,32 +83,7 @@ impl Widget for QuickSettings {
 
         s.spawn(panel, b.music_player);
 
-        // Two rows of five equally sized tiles.
-        let grid = s.spawn(
-            panel,
-            div().style(full_width(TILE_HEIGHT * TILE_ROWS as f32).column()),
-        );
-        for icons in b.tile_icons.chunks_exact(TILE_COLUMNS) {
-            let row = s.spawn(grid, div().style(full_width(TILE_HEIGHT).row()));
-            for &sprite in icons {
-                let tile = s.spawn(
-                    row,
-                    placeholder(
-                        full_width(TILE_HEIGHT)
-                            .width(percent(100.0 / TILE_COLUMNS as f32))
-                            .center(),
-                        s,
-                        ColorRole::Surface,
-                    ),
-                );
-                s.spawn(
-                    tile,
-                    icon(sprite)
-                        .style(LayoutStyle::default().shrink(0.0))
-                        .color(s.color(ColorRole::OnSurface)),
-                );
-            }
-        }
+        s.spawn(panel, b.tiles);
 
         // Static preview levels: brightness first, then volume.
         let sliders = s.spawn(
@@ -179,28 +153,6 @@ fn main() {
     let font = atlas
         .add_font(include_bytes!("../assets/fonts/GeistMono-Regular.ttf"))
         .expect("bundled Geist Mono font should load");
-    // Row-major reference order.
-    let tile_icons = [
-        load_icon(&mut atlas, include_bytes!("../assets/wifi/wifi-high.svg")),
-        load_icon(
-            &mut atlas,
-            include_bytes!("../assets/bluetooth/bluetooth.svg"),
-        ),
-        load_icon(&mut atlas, include_bytes!("../assets/rotate.svg")),
-        load_icon(&mut atlas, include_bytes!("../assets/terminal.svg")),
-        load_icon(&mut atlas, include_bytes!("../assets/file-manager.svg")),
-        load_icon(
-            &mut atlas,
-            include_bytes!("../assets/cellular/cell-signal-full.svg"),
-        ),
-        load_icon(
-            &mut atlas,
-            include_bytes!("../assets/battery/battery-low.svg"),
-        ),
-        load_icon(&mut atlas, include_bytes!("../assets/record.svg")),
-        load_icon(&mut atlas, include_bytes!("../assets/camera.svg")),
-        load_icon(&mut atlas, include_bytes!("../assets/settings.svg")),
-    ];
     let brightness_icon = load_icon(
         &mut atlas,
         include_bytes!("../assets/brightness/brightness-medium.svg"),
@@ -252,7 +204,7 @@ fn main() {
         QuickSettingsBuilder {
             root,
             music_player,
-            tile_icons,
+            tiles: TilesBuilder { font },
             brightness_icon,
             volume_icon,
         },

@@ -1,0 +1,138 @@
+use mecha_wayland::prelude::*;
+
+use crate::{full_width, load_icon};
+
+pub mod battery;
+pub mod bluetooth;
+pub mod camera;
+pub mod cellular;
+pub mod file_manager;
+pub mod record;
+pub mod rotate;
+pub mod settings;
+pub mod terminal;
+pub mod wifi;
+
+pub use battery::{Battery, BatteryBuilder};
+pub use bluetooth::{Bluetooth, BluetoothBuilder};
+pub use camera::{Camera, CameraBuilder};
+pub use cellular::{Cellular, CellularBuilder};
+pub use file_manager::{FileManager, FileManagerBuilder};
+pub use record::{Record, RecordBuilder};
+pub use rotate::{Rotate, RotateBuilder};
+pub use settings::{Settings, SettingsBuilder};
+pub use terminal::{Terminal, TerminalBuilder};
+pub use wifi::{Wifi, WifiBuilder};
+
+const TILE_HEIGHT: f32 = 139.0;
+const TILE_COLUMNS: usize = 5;
+pub const GRID_HEIGHT: f32 = TILE_HEIGHT * 2.0;
+
+/// Individually addressable tiles, in the reference layout's order.
+pub struct Tiles {
+    pub wifi: Handle<Wifi>,
+    pub bluetooth: Handle<Bluetooth>,
+    pub rotate: Handle<Rotate>,
+    pub terminal: Handle<Terminal>,
+    pub file_manager: Handle<FileManager>,
+    pub cellular: Handle<Cellular>,
+    pub battery: Handle<Battery>,
+    pub record: Handle<Record>,
+    pub camera: Handle<Camera>,
+    pub settings: Handle<Settings>,
+}
+
+pub struct TilesBuilder {
+    pub font: FontId,
+}
+
+impl Build for TilesBuilder {
+    type Widget = Tiles;
+}
+
+impl Widget for Tiles {
+    type Builder = TilesBuilder;
+
+    fn build(b: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
+        *s.component_mut::<LayoutStyle>(me).unwrap() = full_width(GRID_HEIGHT).column();
+
+        let top = s.spawn(me, div().style(full_width(TILE_HEIGHT).row()));
+        let wifi = s.spawn(
+            top,
+            WifiBuilder {
+                font: b.font,
+                name: "Office 01".into(),
+            },
+        );
+        let bluetooth = s.spawn(
+            top,
+            BluetoothBuilder {
+                font: b.font,
+                name: "Comet".into(),
+            },
+        );
+        let rotate = s.spawn(top, RotateBuilder);
+        let terminal = s.spawn(top, TerminalBuilder);
+        let file_manager = s.spawn(top, FileManagerBuilder);
+
+        let bottom = s.spawn(me, div().style(full_width(TILE_HEIGHT).row()));
+        let cellular = s.spawn(bottom, CellularBuilder);
+        let battery = s.spawn(
+            bottom,
+            BatteryBuilder {
+                font: b.font,
+                percentage: 84,
+            },
+        );
+        let record = s.spawn(bottom, RecordBuilder);
+        let camera = s.spawn(bottom, CameraBuilder);
+        let settings = s.spawn(bottom, SettingsBuilder);
+
+        Tiles {
+            wifi,
+            bluetooth,
+            rotate,
+            terminal,
+            file_manager,
+            cellular,
+            battery,
+            record,
+            camera,
+            settings,
+        }
+    }
+}
+
+/// Shared appearance only; each tile owns its children and future behavior.
+fn build_tile<W: Widget>(me: Handle<W>, s: &mut Spawner<'_, W>, svg: &[u8]) -> Handle<Icon> {
+    *s.component_mut::<LayoutStyle>(me).unwrap() = full_width(TILE_HEIGHT)
+        .width(percent(100.0 / TILE_COLUMNS as f32))
+        .column()
+        .center()
+        .gap(px(12.0));
+    *s.component_mut::<Paint>(me).unwrap() = Paint::Quad(
+        Quad::new(s.color(ColorRole::Surface)).border(1.0, s.color(ColorRole::OutlineVariant)),
+    );
+    let sprite = load_icon(&mut s.resource_mut::<Atlas>(), svg);
+    s.spawn(
+        me,
+        icon(sprite)
+            .style(LayoutStyle::default().shrink(0.0))
+            .color(s.color(ColorRole::OnSurface)),
+    )
+}
+
+fn build_label<W: Widget>(
+    me: Handle<W>,
+    s: &mut Spawner<'_, W>,
+    font: FontId,
+    value: impl Into<String>,
+) -> Handle<Text> {
+    s.spawn(
+        me,
+        text(font, value)
+            .size(18)
+            .style(LayoutStyle::default().shrink(0.0))
+            .color(s.color(ColorRole::OnSurfaceVariant)),
+    )
+}
