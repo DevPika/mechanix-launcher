@@ -11,11 +11,26 @@ const PROGRESS_HEIGHT: f32 = 3.0;
 const PROGRESS_PERCENT: f32 = 42.0;
 const THUMB_SIZE: f32 = 14.0;
 
+fn playback_button(size: f32, theme: &impl ThemeReader) -> ButtonBuilder {
+    button()
+        .style(
+            LayoutStyle::default()
+                .size(px(size), px(size))
+                .shrink(0.0)
+                .center(),
+        )
+        .radius(Corners::all(size / 2.0))
+        .hover_background(theme.color(ColorRole::SurfaceContainerHigh))
+        .pressed_background(theme.color(ColorRole::SurfaceContainerHighest))
+}
+
 pub struct MusicPlayer;
 
 pub struct MusicPlayerBuilder {
     pub font: FontId,
-    pub placeholder_icon: SpriteId,
+    pub previous_icon: SpriteId,
+    pub play_icon: SpriteId,
+    pub next_icon: SpriteId,
 }
 
 impl Build for MusicPlayerBuilder {
@@ -36,7 +51,7 @@ impl Widget for MusicPlayer {
                 .border(1.0, s.color(ColorRole::OutlineVariant)),
         );
 
-        let album = s.spawn(
+        s.spawn(
             me,
             placeholder(
                 LayoutStyle::default()
@@ -47,10 +62,6 @@ impl Widget for MusicPlayer {
                 ColorRole::SurfaceContainerHigh,
             )
             .radius(4.0),
-        );
-        s.spawn(
-            album,
-            icon(b.placeholder_icon).color(s.color(ColorRole::OnSurfaceVariant)),
         );
 
         let details = s.spawn(
@@ -107,35 +118,20 @@ impl Widget for MusicPlayer {
             ),
         );
 
-        // Previous, play, next. The larger circular button marks play.
-        for is_play in [false, true, false] {
-            let size = if is_play { PLAY_SIZE } else { CONTROL_SIZE };
-            let control = s.spawn(
-                controls,
-                button()
-                    .style(
-                        LayoutStyle::default()
-                            .size(px(size), px(size))
-                            .shrink(0.0)
-                            .center(),
-                    )
-                    .radius(Corners::all(size / 2.0))
-                    .border(
-                        Insets::all(if is_play { 1.0 } else { 0.0 }),
-                        s.color(ColorRole::Outline),
-                    )
-                    .hover_background(s.color(ColorRole::SurfaceContainerHigh))
-                    .pressed_background(s.color(ColorRole::SurfaceContainerHighest)),
-            );
-            s.spawn(
-                control,
-                icon(b.placeholder_icon).color(s.color(if is_play {
-                    ColorRole::Primary
-                } else {
-                    ColorRole::OnSurface
-                })),
-            );
-        }
+        let previous = s.spawn(controls, playback_button(CONTROL_SIZE, s));
+        s.spawn(
+            previous,
+            icon(b.previous_icon).color(s.color(ColorRole::OnSurface)),
+        );
+
+        let play = s.spawn(
+            controls,
+            playback_button(PLAY_SIZE, s).border(Insets::all(1.0), s.color(ColorRole::Outline)),
+        );
+        s.spawn(play, icon(b.play_icon).color(s.color(ColorRole::Primary)));
+
+        let next = s.spawn(controls, playback_button(CONTROL_SIZE, s));
+        s.spawn(next, icon(b.next_icon).color(s.color(ColorRole::OnSurface)));
 
         let progress = s.spawn(
             details,
