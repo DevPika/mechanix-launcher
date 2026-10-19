@@ -43,7 +43,7 @@ pub struct Tiles {
     pub settings: Handle<Settings>,
     pub camera: Handle<Camera>,
     pub rotate: Handle<Rotate>,
-    pub secondary_display: Handle<DisplayTile>,
+    pub battery: Handle<Battery>,
 }
 
 pub struct TilesBuilder {
@@ -84,7 +84,14 @@ impl Widget for Tiles {
         let settings = s.spawn(bottom, SettingsBuilder);
         let camera = s.spawn(bottom, CameraBuilder);
         let rotate = s.spawn(bottom, RotateBuilder);
-        let secondary_display = s.spawn(bottom, DisplayTileBuilder);
+        let battery = s.spawn(
+            bottom,
+            BatteryBuilder {
+                font: b.font,
+                percentage: 100,
+            },
+        );
+        // let secondary_display = s.spawn(bottom, DisplayTileBuilder);
 
         Tiles {
             wifi,
@@ -96,7 +103,7 @@ impl Widget for Tiles {
             settings,
             camera,
             rotate,
-            secondary_display,
+            battery,
         }
     }
 }
