@@ -5,6 +5,7 @@ mod services;
 mod tiles;
 
 use header::{HEADER_HEIGHT, HeaderBuilder};
+use services::UpowerModule;
 use tiles::{GRID_HEIGHT, TilesBuilder};
 
 // Initial window size only; the panel fills the actual window dimensions.
@@ -179,6 +180,7 @@ fn main() {
         .insert_resource(atlas);
     app.add_module(RingModule::default())
         .add_module(DBusModule::new().system())
+        .add_module(UpowerModule)
         .add_module(
             WaylandModule::new()
                 .bind::<WlCompositor>()
