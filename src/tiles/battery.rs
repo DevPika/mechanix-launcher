@@ -1,6 +1,7 @@
 use mecha_wayland::prelude::*;
 
 use super::{build_label, build_tile};
+use crate::services::BatteryPercentageChanged;
 
 pub struct Battery {
     pub icon: Handle<Icon>,

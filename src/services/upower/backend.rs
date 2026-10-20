@@ -16,10 +16,10 @@ pub(super) struct UpowerBattery {
 }
 impl Resource for UpowerBattery {}
 
-pub(super) struct BatteryPercentageChanged {
+pub struct BatteryPercentageChanged {
     /// event to send when the battery percentage changes
     /// None means the battery is invalid
-    pub(super) percentage: Option<u8>,
+    pub percentage: Option<u8>,
 }
 impl Event for BatteryPercentageChanged {}
 

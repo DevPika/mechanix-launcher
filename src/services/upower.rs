@@ -4,6 +4,8 @@ mod backend;
 #[cfg(test)]
 mod test;
 
+pub use backend::BatteryPercentageChanged;
+
 use backend::{DEVICE_INTERFACE, DISPLAY_DEVICE, UPOWER, UpowerBattery, upower_types};
 use mecha_wayland::prelude::*;
 
