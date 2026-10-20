@@ -1,9 +1,11 @@
 use mecha_wayland::prelude::*;
 
 mod header;
-pub mod tiles;
+mod services;
+mod tiles;
 
 use header::{HEADER_HEIGHT, HeaderBuilder};
+use services::UpowerModule;
 use tiles::{GRID_HEIGHT, TilesBuilder};
 
 // Initial window size only; the panel fills the actual window dimensions.
@@ -177,6 +179,8 @@ fn main() {
         .add_module(RenderModule::default())
         .insert_resource(atlas);
     app.add_module(RingModule::default())
+        .add_module(DBusModule::new().system())
+        .add_module(UpowerModule)
         .add_module(
             WaylandModule::new()
                 .bind::<WlCompositor>()
@@ -200,5 +204,6 @@ fn main() {
             volume_icon,
         },
     );
+
     app.run();
 }

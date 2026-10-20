@@ -1,6 +1,7 @@
 use mecha_wayland::prelude::*;
 
 use super::{build_label, build_tile};
+use crate::services::BatteryPercentageChanged;
 
 pub struct Battery {
     pub icon: Handle<Icon>,
@@ -9,7 +10,6 @@ pub struct Battery {
 
 pub struct BatteryBuilder {
     pub font: FontId,
-    pub percentage: u8,
 }
 
 impl Build for BatteryBuilder {
@@ -25,7 +25,16 @@ impl Widget for Battery {
             s,
             include_bytes!("../../assets/battery/battery-low.svg"),
         );
-        let percentage = build_label(me, s, b.font, format!("{}%", b.percentage));
+        let percentage = build_label(me, s, b.font, "N/A");
+
+        s.on::<BatteryPercentageChanged>(me, move |ctx, e| {
+            let label = match e.percentage {
+                Some(value) => format!("{value}%"),
+                None => "N/A".to_owned(),
+            };
+
+            ctx.at(percentage).unwrap().set_text(label);
+        });
         Battery { icon, percentage }
     }
 }
