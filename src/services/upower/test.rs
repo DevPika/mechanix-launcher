@@ -1,9 +1,8 @@
 use super::UpowerModule;
 use super::backend::{
-    DEVICE_INTERFACE, DISPLAY_DEVICE, UPOWER, UpowerBattery, battery_percentage, battery_valid,
-    upower_types,
+    BatteryPercentageChanged, DEVICE_INTERFACE, DISPLAY_DEVICE, UPOWER, UpowerBattery,
+    battery_percentage, battery_valid, upower_types,
 };
-use crate::StatusUpdate;
 use mecha_wayland::prelude::*;
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
@@ -13,10 +12,8 @@ use std::os::unix::net::UnixStream;
 struct Updates(Vec<Option<u8>>);
 impl Resource for Updates {}
 
-fn record_update(app: &mut App, event: &Emitted<StatusUpdate>) {
-    if let StatusUpdate::Battery(percentage) = event.event {
-        app.resource_mut::<Updates>().0.push(percentage);
-    }
+fn record_update(app: &mut App, event: &Emitted<BatteryPercentageChanged>) {
+    app.resource_mut::<Updates>().0.push(event.event.percentage);
 }
 
 /// A private socket pair supplies only the D-Bus startup handshake. Tests inject
@@ -405,13 +402,13 @@ fn percentage_signal_emits_even_when_other_properties_are_absent() {
 }
 
 #[test]
-fn missing_percentage_and_unrelated_invalidations_emit_nothing() {
+fn missing_percentage_and_unrelated_invalidations_emit_none() {
     let mut h = Harness::new();
     let call = h.call();
     h.change(PropMap::new(), &[]);
     h.change(props(&[("TimeToEmpty", Value::I64(120))]), &["State"]);
     assert_eq!(h.call(), call);
-    assert!(h.updates().is_empty());
+    assert_eq!(h.updates(), [None, None]);
 }
 
 #[test]
@@ -424,7 +421,7 @@ fn unrelated_invalidation_does_not_suppress_percentage() {
 }
 
 #[test]
-fn explicit_eligibility_changes_alone_are_ignored_as_designed() {
+fn explicit_eligibility_changes_alone_emit_none_without_updating_eligibility() {
     let mut h = Harness::new();
     h.reply(h.call(), snapshot(true, 2, 80.0));
     h.updates();
@@ -435,7 +432,7 @@ fn explicit_eligibility_changes_alone_are_ignored_as_designed() {
     );
     assert_eq!(h.call(), call);
     assert!(battery_valid(&h.app));
-    assert!(h.updates().is_empty());
+    assert_eq!(h.updates(), [None]);
 }
 
 #[test]

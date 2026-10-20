@@ -16,6 +16,13 @@ pub(super) struct UpowerBattery {
 }
 impl Resource for UpowerBattery {}
 
+pub(super) struct BatteryPercentageChanged {
+    /// event to send when the battery percentage changes
+    /// None means the battery is invalid
+    pub(super) percentage: Option<u8>,
+}
+impl Event for BatteryPercentageChanged {}
+
 pub(super) const UPOWER: &str = "org.freedesktop.UPower";
 pub(super) const DISPLAY_DEVICE: &str = "/org/freedesktop/UPower/devices/DisplayDevice";
 pub(super) const DEVICE_INTERFACE: &str = "org.freedesktop.UPower.Device";
@@ -49,11 +56,10 @@ pub(super) fn on_reply(app: &mut App, e: &MethodReply) {
     } else {
         None
     };
-
-    // TODO: main.rs discards the NodeID of the main status bar, store it so we
-    // can send events easily
-    // let bars: Vec<NodeId> = ;
-    // app.emit(StatusUpdate::Battery(percentage), bars);
+    app.emit(
+        BatteryPercentageChanged { percentage },
+        app.descendants(app.root()).collect::<Vec<_>>(),
+    );
 }
 
 pub(super) fn on_property_changed(app: &mut App, e: &SignalReceived) {
@@ -80,11 +86,12 @@ pub(super) fn on_property_changed(app: &mut App, e: &SignalReceived) {
         app.resource_mut::<UpowerBattery>().property_read = call;
         return;
     }
-
-    if let Some(pct) = battery_percentage(&changed) {
-        // let bars: Vec<NodeId> = app.widgets::<StatusBar>().map(|(id, _)| id).collect();
-        // app.emit(StatusUpdate::Battery(Some(pct)), bars);
-    }
+    app.emit(
+        BatteryPercentageChanged {
+            percentage: battery_percentage(&changed),
+        },
+        app.descendants(app.root()).collect::<Vec<_>>(),
+    );
 }
 
 pub(super) fn battery_valid(app: &App) -> bool {
