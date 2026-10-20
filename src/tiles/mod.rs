@@ -88,7 +88,6 @@ impl Widget for Tiles {
             bottom,
             BatteryBuilder {
                 font: b.font,
-                percentage: 100,
             },
         );
         // let secondary_display = s.spawn(bottom, DisplayTileBuilder);

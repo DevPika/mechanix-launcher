@@ -1,3 +1,3 @@
 pub mod upower;
 
-pub use upower::{UpowerModule, BatteryPercentageChanged};
+pub use upower::{BatteryPercentageChanged, UpowerModule};
