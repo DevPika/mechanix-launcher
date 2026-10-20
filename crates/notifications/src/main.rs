@@ -5,6 +5,7 @@ pub mod card;
 pub mod card_list;
 pub mod dbus;
 pub mod dbus_spec;
+pub mod markup;
 pub mod notification_store;
 pub mod notify;
 pub mod notify_signal;
