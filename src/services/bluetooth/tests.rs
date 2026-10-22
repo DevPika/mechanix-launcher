@@ -157,12 +157,6 @@ fn toggle_updates_only_after_bluez_property_signal() {
         .add_module(DBusModule::new().system())
         .add_module(super::BluetoothModule);
 
-    // No known adapter: don't write to an assumed hci0 path.
-    super::backend::toggle(&mut app);
-    assert_eq!(
-        app.resource::<super::BluetoothStatus>().state,
-        BluetoothState::Off
-    );
     let adapter = ObjectPath::new("/org/bluez/hci1").unwrap();
     {
         let mut status = app.resource_mut::<super::BluetoothStatus>();
@@ -195,6 +189,45 @@ fn toggle_updates_only_after_bluez_property_signal() {
         app.resource::<super::BluetoothStatus>().state,
         BluetoothState::On
     );
+}
+
+#[test]
+fn toggle_without_known_adapters_does_not_toggle_state() {
+    let mut app = App::new();
+    app.add_module(RingModule::default())
+        .add_module(DBusModule::new().system())
+        .add_module(super::BluetoothModule);
+
+    // Initial snapshot was requested on module install
+    assert!(app.resource::<super::BluetoothStatus>().pending.is_some());
+
+    // Toggle when no adapters are known should be ignored without changing state
+    super::backend::toggle(&mut app);
+    assert_eq!(
+        app.resource::<super::BluetoothStatus>().state,
+        BluetoothState::Off
+    );
+
+    // Discover adapter with Powered: false
+    let call = app.resource::<super::BluetoothStatus>().pending.unwrap();
+    app.signal(MethodReply {
+        call,
+        result: Ok(
+            Message::method_return(call.serial).with_body(&(ManagedObjects::from([(
+                ObjectPath::new("/org/bluez/hci1").unwrap(),
+                HashMap::from([(
+                    ADAPTER.into(),
+                    PropMap::from([("Powered".into(), Value::Bool(false))]),
+                )]),
+            )]),)),
+        ),
+    });
+    app.flush();
+
+    let status = app.resource::<super::BluetoothStatus>();
+    // Since the previous toggle was ignored, state remains Off
+    assert_eq!(status.state, BluetoothState::Off);
+    assert_eq!(status.observed.adapters.len(), 1);
 }
 
 #[test]

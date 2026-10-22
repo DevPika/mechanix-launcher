@@ -175,6 +175,7 @@ pub(super) fn on_disconnect(app: &mut App, event: &BusDisconnected) {
     }
 }
 
+/// Powers all known BlueZ adapters on or off; requests a snapshot if none are known.
 pub fn set_powered(app: &mut App, powered: bool) {
     let paths: Vec<ObjectPath> = {
         let bluetooth = app.resource::<BluetoothStatus>();
@@ -194,8 +195,16 @@ pub fn set_powered(app: &mut App, powered: bool) {
     }
 }
 
+/// Toggles Bluetooth power; refreshes the adapter snapshot and no-ops if no adapters exist yet.
 pub fn toggle(app: &mut App) {
-    let current_powered = app.resource::<BluetoothStatus>().state != BluetoothState::Off;
+    let bluetooth = app.resource::<BluetoothStatus>();
+    if bluetooth.observed.adapters.is_empty() {
+        if bluetooth.pending.is_none() {
+            request_snapshot(app);
+        }
+        return;
+    }
+    let current_powered = bluetooth.state != BluetoothState::Off;
     set_powered(app, !current_powered);
 }
 
