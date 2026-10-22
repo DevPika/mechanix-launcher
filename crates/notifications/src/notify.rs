@@ -1,3 +1,4 @@
+use crate::markup::Markup;
 use crate::{
     notification_store::{Entry, NotificationStore},
     notify_signal::NotificationSignal::{AddNotification, UpdateNotification},
@@ -11,7 +12,7 @@ pub struct Notification {
     pub app_name: String,
     pub app_icon: String,
     pub summary: String,
-    pub body: String,
+    pub body: Markup,
     pub actions: Vec<(String, String)>,
     pub expire_timeout: i32,
     pub hints: Categories,
@@ -64,6 +65,8 @@ impl From<NotifyArgs> for Notify {
             .get_as::<String>("desktop-entry")
             .and_then(Result::ok)
             .unwrap_or_default();
+
+        let body = Markup::parse(&body);
 
         Notify {
             replaces_id,

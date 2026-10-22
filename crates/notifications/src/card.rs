@@ -1,3 +1,4 @@
+use crate::rich_text::RichTextExt;
 use mecha_wayland::mechanix_widgets::prelude::TextContextExt;
 use mecha_wayland::mechanix_widgets::{self as mw, button};
 use mecha_wayland::prelude::*;
@@ -6,6 +7,7 @@ use std::time::SystemTime;
 use crate::dbus_spec::NOTIFIFICATION_DISMISSED;
 use crate::notification_store::Entry;
 use crate::notify_signal::NotificationSignal::RemoveNotification;
+use crate::rich_text::RichTextBuilder;
 use crate::style::{color, shape, size, space, text};
 
 pub struct CardBuilder {
@@ -97,13 +99,11 @@ impl Widget for Card {
                 .color(text::CARD_TIME.color),
         );
 
-        let body = s.spawn(
+        let rich_text = s.spawn(
             column,
-            mw::text(b.entry.notification.body)
-                .variant(text::CARD_BODY.variant)
-                .color(text::CARD_BODY.color)
-                .max_lines(1)
-                .overflow(TextOverflow::Ellipsis),
+            RichTextBuilder {
+                runs: b.entry.notification.body.into_runs(),
+            },
         );
 
         s.on::<UpdateCard>(me, move |ctx, e| {
@@ -111,9 +111,11 @@ impl Widget for Card {
             ctx.at(summary)
                 .unwrap()
                 .set_text(entry.notification.summary.clone());
-            ctx.at(body)
+
+            ctx.at(rich_text)
                 .unwrap()
-                .set_text(entry.notification.body.clone());
+                .set_run(entry.notification.body.clone().into_runs());
+            // TODO: update the body's runs
             ctx.at(time).unwrap().set_text(ago(entry.received_time));
         });
 

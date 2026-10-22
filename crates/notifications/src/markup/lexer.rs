@@ -1,23 +1,24 @@
 #[derive(Debug, PartialEq)]
-enum Token<'lexer> {
+pub enum Token<'lexer> {
     Open(Tag),
     Text(&'lexer str),
     Close(Tag),
 }
 
-struct Lexer<'lexer> {
+#[derive(Debug, Clone, Default)]
+pub struct Lexer<'lexer> {
     rest: &'lexer str,
 }
 
 #[derive(Debug, PartialEq)]
-enum Tag {
+pub enum Tag {
     Bold,
     Italic,
     Underline,
 }
 
 impl<'lexer> Lexer<'lexer> {
-    fn new(input: &'lexer str) -> Self {
+    pub fn new(input: &'lexer str) -> Self {
         Self { rest: input }
     }
 }
