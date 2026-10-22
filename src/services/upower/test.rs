@@ -402,18 +402,22 @@ fn percentage_signal_emits_even_when_other_properties_are_absent() {
 }
 
 #[test]
-fn missing_percentage_and_unrelated_invalidations_emit_none() {
+fn missing_percentage_and_unrelated_invalidations_leave_label_unchanged() {
     let mut h = Harness::new();
+    h.reply(h.call(), snapshot(true, 2, 80.0));
+    assert_eq!(h.updates(), [Some(80)]);
     let call = h.call();
     h.change(PropMap::new(), &[]);
     h.change(props(&[("TimeToEmpty", Value::I64(120))]), &["State"]);
     assert_eq!(h.call(), call);
-    assert_eq!(h.updates(), [None, None]);
+    assert!(h.updates().is_empty());
 }
 
 #[test]
 fn unrelated_invalidation_does_not_suppress_percentage() {
     let mut h = Harness::new();
+    h.reply(h.call(), snapshot(true, 2, 80.0));
+    h.updates();
     let call = h.call();
     h.change(props(&[("Percentage", Value::F64(55.0))]), &["TimeToEmpty"]);
     assert_eq!(h.call(), call);
@@ -421,7 +425,7 @@ fn unrelated_invalidation_does_not_suppress_percentage() {
 }
 
 #[test]
-fn explicit_eligibility_changes_alone_emit_none_without_updating_eligibility() {
+fn explicit_eligibility_changes_refresh_snapshot() {
     let mut h = Harness::new();
     h.reply(h.call(), snapshot(true, 2, 80.0));
     h.updates();
@@ -430,9 +434,21 @@ fn explicit_eligibility_changes_alone_emit_none_without_updating_eligibility() {
         props(&[("IsPresent", Value::Bool(false)), ("Type", Value::U32(3))]),
         &[],
     );
-    assert_eq!(h.call(), call);
+    assert_ne!(h.call(), call);
     assert!(battery_valid(&h.app));
+    assert!(h.updates().is_empty());
+    h.reply(h.call(), snapshot(false, 3, 80.0));
+    assert!(!battery_valid(&h.app));
     assert_eq!(h.updates(), [None]);
+}
+
+#[test]
+fn percentage_signal_on_ineligible_device_does_not_show_battery() {
+    let mut h = Harness::new();
+    h.reply(h.call(), snapshot(false, 2, 40.0));
+    assert_eq!(h.updates(), [None]);
+    h.change(props(&[("Percentage", Value::F64(60.0))]), &[]);
+    assert!(h.updates().is_empty());
 }
 
 #[test]
@@ -457,6 +473,8 @@ fn unrelated_subscription_is_ignored_before_parsing() {
 #[test]
 fn matching_subscription_need_not_be_first_in_matches() {
     let mut h = Harness::new();
+    h.reply(h.call(), snapshot(true, 2, 80.0));
+    h.updates();
     let other = h
         .app
         .resource_mut::<DBus>()

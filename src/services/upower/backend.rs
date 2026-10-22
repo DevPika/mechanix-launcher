@@ -70,13 +70,14 @@ pub(super) fn on_property_changed(app: &mut App, e: &SignalReceived) {
         return;
     }
 
-    // check if anything we care about is invalidated
     let (_, changed, invalidated) =
         PropertiesChanged::parse(&e.msg).expect("UPower: invalid PropertiesChanged signal");
 
     if invalidated
         .iter()
         .any(|name| matches!(name.as_str(), "IsPresent" | "Type" | "Percentage"))
+        || changed.contains_key("IsPresent")
+        || changed.contains_key("Type")
     {
         let call = app
             .resource_mut::<DBus>()
@@ -86,12 +87,16 @@ pub(super) fn on_property_changed(app: &mut App, e: &SignalReceived) {
         app.resource_mut::<UpowerBattery>().property_read = call;
         return;
     }
-    app.emit(
-        BatteryPercentageChanged {
-            percentage: battery_percentage(&changed),
-        },
-        app.descendants(app.root()).collect::<Vec<_>>(),
-    );
+    if let Some(percentage) = battery_percentage(&changed)
+        && battery_valid(app)
+    {
+        app.emit(
+            BatteryPercentageChanged {
+                percentage: Some(percentage),
+            },
+            app.descendants(app.root()).collect::<Vec<_>>(),
+        );
+    }
 }
 
 pub(super) fn battery_valid(app: &App) -> bool {
