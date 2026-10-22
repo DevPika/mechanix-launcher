@@ -1,4 +1,4 @@
-//! Read-only BlueZ client on mecha-wayland's system D-Bus connection.
+//! BlueZ client on mecha-wayland's system D-Bus connection.
 use std::collections::HashMap;
 
 use super::BluetoothStatus;
@@ -111,9 +111,9 @@ pub(super) fn on_snapshot_reply(app: &mut App, event: &MethodReply) {
         let mut bluetooth = app.resource_mut::<BluetoothStatus>();
         bluetooth.pending = None;
         if !bluetooth.dirty {
-            bluetooth.observed = objects
-                .map(|(objects,)| BluetoothObservation::from_managed_objects(objects))
-                .unwrap_or_default();
+            if let Some((objects,)) = objects {
+                bluetooth.observed = BluetoothObservation::from_managed_objects(objects);
+            }
         }
         (bluetooth.dirty, bluetooth.observed.state())
     };
@@ -178,34 +178,20 @@ pub(super) fn on_disconnect(app: &mut App, event: &BusDisconnected) {
 pub fn set_powered(app: &mut App, powered: bool) {
     let paths: Vec<ObjectPath> = {
         let bluetooth = app.resource::<BluetoothStatus>();
-        let mut list: Vec<ObjectPath> = bluetooth.observed.adapters.keys().cloned().collect();
-        if list.is_empty() {
-            if let Ok(default_path) = ObjectPath::new("/org/bluez/hci0") {
-                list.push(default_path);
-            }
-        }
-        list
+        bluetooth.observed.adapters.keys().cloned().collect()
     };
 
-    {
-        let mut dbus = app.resource_mut::<DBus>();
-        for path in &paths {
-            dbus.system().object(BLUEZ, path.clone()).set_property(
-                ADAPTER,
-                "Powered",
-                Value::Bool(powered),
-            );
-        }
+    if paths.is_empty() {
+        request_snapshot(app);
+        return;
     }
 
-    let new_state = {
-        let mut bluetooth = app.resource_mut::<BluetoothStatus>();
-        for path in paths {
-            bluetooth.observed.adapters.insert(path, powered);
-        }
-        bluetooth.observed.state()
-    };
-    publish_state(app, new_state);
+    let mut dbus = app.resource_mut::<DBus>();
+    for path in paths {
+        dbus.system()
+            .object(BLUEZ, path)
+            .set_property(ADAPTER, "Powered", Value::Bool(powered));
+    }
 }
 
 pub fn toggle(app: &mut App) {

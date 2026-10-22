@@ -151,16 +151,88 @@ fn adapter_power_toggle_transitions() {
 }
 
 #[test]
-fn test_toggle_optimistic_update() {
+fn toggle_updates_only_after_bluez_property_signal() {
     let mut app = App::new();
     app.add_module(RingModule::default())
         .add_module(DBusModule::new().system())
         .add_module(super::BluetoothModule);
 
-    assert_eq!(app.resource::<super::BluetoothStatus>().state, BluetoothState::Off);
+    // No known adapter: don't write to an assumed hci0 path.
     super::backend::toggle(&mut app);
-    assert_eq!(app.resource::<super::BluetoothStatus>().state, BluetoothState::On);
+    assert_eq!(
+        app.resource::<super::BluetoothStatus>().state,
+        BluetoothState::Off
+    );
+    let adapter = ObjectPath::new("/org/bluez/hci1").unwrap();
+    {
+        let mut status = app.resource_mut::<super::BluetoothStatus>();
+        status.observed.adapters.insert(adapter.clone(), false);
+        status.pending = None;
+    }
     super::backend::toggle(&mut app);
-    assert_eq!(app.resource::<super::BluetoothStatus>().state, BluetoothState::Off);
+    assert_eq!(
+        app.resource::<super::BluetoothStatus>().state,
+        BluetoothState::Off
+    );
+
+    let watch = app.resource::<super::BluetoothStatus>().matches.properties;
+    app.signal(SignalReceived {
+        bus: BusId::System,
+        matches: [watch].into_iter().collect(),
+        msg: Message::signal(
+            adapter,
+            "org.freedesktop.DBus.Properties",
+            "PropertiesChanged",
+        )
+        .with_body(&(
+            ADAPTER,
+            PropMap::from([("Powered".into(), Value::Bool(true))]),
+            Vec::<String>::new(),
+        )),
+    });
+    app.flush();
+    assert_eq!(
+        app.resource::<super::BluetoothStatus>().state,
+        BluetoothState::On
+    );
 }
 
+#[test]
+fn failed_snapshot_preserves_last_observed_state() {
+    let mut app = App::new();
+    app.add_module(RingModule::default())
+        .add_module(DBusModule::new().system())
+        .add_module(super::BluetoothModule);
+
+    let adapter = ObjectPath::new("/org/bluez/hci0").unwrap();
+    {
+        let mut status = app.resource_mut::<super::BluetoothStatus>();
+        status.observed.adapters.insert(adapter, true);
+        status.state = BluetoothState::On;
+    }
+
+    for result in [
+        Err(CallError::Timeout),
+        Ok(Message::method_return(0).with_body(&(42u32,))),
+    ] {
+        let call = app.resource::<super::BluetoothStatus>().pending.unwrap();
+        app.signal(MethodReply { call, result });
+        app.flush();
+        let status = app.resource::<super::BluetoothStatus>();
+        assert_eq!(status.state, BluetoothState::On);
+        assert_eq!(status.observed.state(), BluetoothState::On);
+        assert!(status.pending.is_none());
+        super::backend::request_snapshot(&mut app);
+    }
+
+    let call = app.resource::<super::BluetoothStatus>().pending.unwrap();
+    app.signal(MethodReply {
+        call,
+        result: Ok(Message::method_return(call.serial).with_body(&(ManagedObjects::new(),))),
+    });
+    app.flush();
+    assert_eq!(
+        app.resource::<super::BluetoothStatus>().state,
+        BluetoothState::Off
+    );
+}

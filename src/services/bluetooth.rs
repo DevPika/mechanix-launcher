@@ -1,4 +1,4 @@
-//! Read-only BlueZ status service.
+//! BlueZ status and power control service.
 mod backend;
 mod interface;
 mod types;
