@@ -2,6 +2,10 @@ use mecha_wayland::prelude::*;
 
 use super::build_tile;
 
+mod svg {
+    pub const ICON: &[u8] = include_bytes!("../../assets/record.svg");
+}
+
 pub struct Record {
     pub icon: Handle<Icon>,
 }
@@ -16,7 +20,7 @@ impl Widget for Record {
     type Builder = RecordBuilder;
 
     fn build(_: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-        let icon = build_tile(me, s, include_bytes!("../../assets/record.svg"));
+        let icon = build_tile(me, s, svg::ICON);
         Record { icon }
     }
 }
