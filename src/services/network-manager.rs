@@ -13,6 +13,12 @@ mod nm_device_type {
     pub(super) const WIFI: EType = 2;
 }
 
+mod nm_device_state {
+    type EType = u32;
+    pub(super) const UNKNOWN: EType = 0;
+    pub(super) const ACTIVE: EType = 100;
+}
+
 enum CallType {
     GetAll, // GetAll on NM_MAIN_OBJ
     /// GetAll on ObjectPath of a a device
@@ -21,8 +27,29 @@ enum CallType {
 }
 
 struct WifiDevice {
-    /// Object path of the Wi-Fi device.
+    /// State from the Device interface; 0 means unknown, 100 means activated.
+    state: u32,
+    /// Device PropertiesChanged match for tracking State.
+    /// Take and unregister this match when clearing the device's subscriptions.
+    properties_changed: Option<MatchId>,
+    /// Device.Wireless PropertiesChanged match for tracking ActiveAccessPoint.
+    /// Take and unregister this match when clearing the device's subscriptions.
+    wireless_properties_changed: Option<MatchId>,
+    /// Tracked access point while the device is activated.
+    /// Unregister its subscription before clearing or replacing it.
+    active_ap: Option<ActiveAccessPoint>,
+}
+
+struct ActiveAccessPoint {
+    /// Object path of this device's active access point.
     path: ObjectPath,
+    /// Raw SSID bytes; not necessarily valid UTF-8.
+    ssid: Vec<u8>,
+    /// Signal strength as a percentage from 0 to 100.
+    strength: u8,
+    /// AccessPoint PropertiesChanged match for tracking SSID and strength.
+    /// Take and unregister this match when clearing the access point's subscription.
+    properties_changed: Option<MatchId>,
 }
 
 pub struct NMState {
@@ -34,8 +61,8 @@ pub struct NMState {
     /// only relevant if networking_enabled and wireless_hardware_enabled are
     /// also true. Toggle this on and off in DBus to enable and disable wifi
     pub wireless_enabled: bool,
-    /// Discovered Wi-Fi devices, unique by object path.
-    wifi_devices: Vec<WifiDevice>,
+    /// Discovered Wi-Fi devices keyed by their object paths.
+    wifi_devices: HashMap<ObjectPath, WifiDevice>,
     /// Match for main-object PropertiesChanged on the NetworkManager interface.
     /// Take and unregister this match when clearing subscriptions for rediscovery.
     properties_changed: Option<MatchId>,
@@ -78,7 +105,7 @@ impl Module for NetworkManagerModule {
             networking_enabled: false,
             wireless_hardware_enabled: false,
             wireless_enabled: false,
-            wifi_devices: Vec::new(),
+            wifi_devices: HashMap::new(),
             properties_changed: Some(properties_changed),
             device_added: Some(device_added),
             device_removed: Some(device_removed),
@@ -128,6 +155,8 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 unwrap_property(&properties, "WirelessHardwareEnabled");
             state.wireless_enabled = unwrap_property(&properties, "WirelessEnabled");
 
+            // Todo: Event here
+
             // Request all properties on devices
             let devices: Vec<ObjectPath> = unwrap_property(&properties, "Devices");
             for path in devices {
@@ -163,9 +192,12 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
             re-requesting ActiveConnection and this also allows DeviceAdded to
             blindly push without checking first.
             */
-            if !state.wifi_devices.iter().any(|device| device.path == path) {
-                state.wifi_devices.push(WifiDevice { path });
-            }
+            state.wifi_devices.entry(path).or_insert(WifiDevice {
+                state: nm_device_state::UNKNOWN,
+                properties_changed: None,
+                wireless_properties_changed: None,
+                active_ap: None,
+            });
         }
     }
 }
