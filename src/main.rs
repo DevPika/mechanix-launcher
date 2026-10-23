@@ -11,7 +11,7 @@ mod util;
 use bottom_bar::BottomBarBuilder;
 use header::HeaderBuilder;
 use quick_settings::QuickSettingsBuilder;
-use services::{BluetoothModule, UpowerModule, NetworkManagerModule};
+use services::{BluetoothModule, NetworkManagerModule, UpowerModule};
 use sliders::SlidersBuilder;
 
 const PANEL_HEIGHT: f32 = 620.0;
