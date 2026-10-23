@@ -37,6 +37,10 @@ struct Node {
     state: ContainerState,
     /// The motion that last drove this container.
     driver: Rc<dyn Motion>,
+    /// px/ms, screen-down positive: the velocity of the gesture that last
+    /// drove this container as it let go, passed to every settle. Zero
+    /// when something other than a gesture drove it.
+    velocity: (f32, f32),
 }
 
 /// An entry of a node that the live gesture may still fire.
@@ -53,6 +57,8 @@ struct Live {
     velocity: VelocityTracker,
     axis: AxisLock,
     candidates: Vec<Candidate>,
+    /// Nodes whose presence a `follow` has changed during this gesture.
+    moved: Vec<usize>,
 }
 
 /// A container's `(id, parent, screen)`, as returned by [`Stack::new`].
@@ -102,6 +108,7 @@ impl Stack {
                 target,
             },
             driver: Rc::new(INSTANT),
+            velocity: (0.0, 0.0),
         });
         if let Some(p) = parent {
             self.nodes[p].children.push(index);
@@ -146,6 +153,7 @@ impl Stack {
                     velocity,
                     axis: AxisLock::new(self.cfg.axis_lock_px),
                     candidates,
+                    moved: Vec::new(),
                 });
             }
             Input::Move { contact, pos, t } => {
@@ -161,16 +169,36 @@ impl Stack {
                 g.axis = live.axis.update(dx, dy);
                 let nodes = &mut self.nodes;
                 let cfg = &self.cfg;
+                let g = &live.gesture;
+                let moved = &mut live.moved;
                 live.candidates.retain(|c| {
                     let node = &mut nodes[c.node];
                     let entry = &node.entries[c.entry];
-                    match entry.trigger.detect(&live.gesture, Phase::Moving, cfg) {
+                    match entry.trigger.detect(g, Phase::Moving, cfg) {
                         Detect::Progress(p) => {
-                            node.state.presence =
-                                entry.motion.follow(node.state.presence, entry.toward, p);
+                            let presence = entry.motion.follow(
+                                node.state.presence,
+                                entry.toward,
+                                p,
+                                g.velocity,
+                            );
+                            // The motion that moves a container drives it
+                            // from here on, so it draws it and settles it.
+                            if presence != node.state.presence {
+                                node.state.presence = presence;
+                                node.driver = entry.motion.clone();
+                                if !moved.contains(&c.node) {
+                                    moved.push(c.node);
+                                }
+                            }
                             true
                         }
-                        Detect::Ignore => false,
+                        Detect::Ignore => {
+                            if moved.contains(&c.node) {
+                                node.velocity = g.velocity;
+                            }
+                            false
+                        }
                         Detect::Commit | Detect::Cancel => true,
                     }
                 });
@@ -183,6 +211,7 @@ impl Stack {
                 let g = &mut live.gesture;
                 g.elapsed = t.saturating_duration_since(live.start_t);
                 g.velocity = live.velocity.velocity(t);
+                let velocity = g.velocity;
                 let mut driven = Vec::new();
                 for c in live.candidates {
                     let entry = &self.nodes[c.node].entries[c.entry];
@@ -190,9 +219,13 @@ impl Stack {
                         .trigger
                         .detect(&live.gesture, Phase::Released, &self.cfg)
                     {
-                        Detect::Commit => self.commit(c, &mut driven),
-                        Detect::Cancel => {
-                            self.drive(c);
+                        // An earlier commit of this gesture may have closed
+                        // the parent: then the child stays closed.
+                        Detect::Commit if self.parent_allows(c) => {
+                            self.commit(c, velocity, &mut driven)
+                        }
+                        Detect::Commit | Detect::Cancel => {
+                            self.drive(c, velocity);
                             driven.push(c.node);
                         }
                         Detect::Progress(_) | Detect::Ignore => {}
@@ -206,18 +239,24 @@ impl Stack {
                 for c in live.candidates {
                     let state = self.nodes[c.node].state;
                     if state.presence != state.target.value() {
-                        self.drive(c);
+                        self.drive(c, live.gesture.velocity);
                         driven.push(c.node);
                     }
                 }
                 self.settle(&driven, Duration::ZERO);
             }
             Input::Tick { dt } => {
-                // A container the finger is holding stays where the finger put it.
+                // A container the finger has moved, and may still move,
+                // stays where the finger put it.
                 let held: Vec<usize> = self
                     .live
                     .iter()
-                    .flat_map(|l| l.candidates.iter().map(|c| c.node))
+                    .flat_map(|l| {
+                        l.candidates
+                            .iter()
+                            .map(|c| c.node)
+                            .filter(|n| l.moved.contains(n))
+                    })
                     .collect();
                 let moving: Vec<usize> = (0..self.nodes.len())
                     .filter(|i| self.is_animating(*i) && !held.contains(i))
@@ -233,7 +272,7 @@ impl Stack {
         for node in 0..self.nodes.len() {
             for entry in 0..self.nodes[node].entries.len() {
                 if self.nodes[node].entries[entry].trigger.on_external(e) {
-                    self.commit(Candidate { node, entry }, &mut driven);
+                    self.commit(Candidate { node, entry }, (0.0, 0.0), &mut driven);
                 }
             }
         }
@@ -270,15 +309,28 @@ impl Stack {
         out
     }
 
-    fn drive(&mut self, c: Candidate) {
+    /// Whether `c`'s parent, as it is now, lets it commit: an open needs
+    /// the parent heading open.
+    fn parent_allows(&self, c: Candidate) -> bool {
+        let node = &self.nodes[c.node];
+        node.entries[c.entry].toward == Final::Closed
+            || node
+                .parent
+                .is_none_or(|p| self.nodes[p].state.target == Final::Open)
+    }
+
+    /// Hands the container to the entry's motion, with the velocity it
+    /// settles from.
+    fn drive(&mut self, c: Candidate, velocity: (f32, f32)) {
         let node = &mut self.nodes[c.node];
         node.driver = node.entries[c.entry].motion.clone();
+        node.velocity = velocity;
     }
 
     /// Sets the target from the entry, records its motion and, on close,
     /// closes every descendant at once.
-    fn commit(&mut self, c: Candidate, driven: &mut Vec<usize>) {
-        self.drive(c);
+    fn commit(&mut self, c: Candidate, velocity: (f32, f32), driven: &mut Vec<usize>) {
+        self.drive(c, velocity);
         driven.push(c.node);
         let toward = self.nodes[c.node].entries[c.entry].toward;
         self.nodes[c.node].state.target = toward;
@@ -290,6 +342,7 @@ impl Stack {
                     presence: 0.0,
                     target: Final::Closed,
                 };
+                node.velocity = (0.0, 0.0);
                 stack.extend(node.children.iter().copied());
             }
         }
@@ -298,9 +351,13 @@ impl Stack {
     fn settle(&mut self, nodes: &[usize], dt: Duration) {
         for &i in nodes {
             let node = &mut self.nodes[i];
-            node.state.presence =
-                node.driver
-                    .settle(node.state.presence, node.state.target, dt, &self.cfg);
+            node.state.presence = node.driver.settle(
+                node.state.presence,
+                node.state.target,
+                dt,
+                node.velocity,
+                &self.cfg,
+            );
         }
     }
 
@@ -752,11 +809,18 @@ mod tests {
     struct Recorder(Rc<RefCell<Vec<f32>>>);
 
     impl Motion for Recorder {
-        fn follow(&self, current: f32, _toward: Final, progress: f32) -> f32 {
+        fn follow(&self, current: f32, _toward: Final, progress: f32, _v: (f32, f32)) -> f32 {
             self.0.borrow_mut().push(progress);
             current
         }
-        fn settle(&self, _current: f32, target: Final, _dt: Duration, _cfg: &NavConfig) -> f32 {
+        fn settle(
+            &self,
+            _current: f32,
+            target: Final,
+            _dt: Duration,
+            _velocity: (f32, f32),
+            _cfg: &NavConfig,
+        ) -> f32 {
             target.value()
         }
     }
@@ -779,6 +843,157 @@ mod tests {
         assert!(got.windows(2).all(|w| w[0] < w[1]), "{got:?}");
         assert!(got.iter().all(|p| (0.0..=1.0).contains(p)), "{got:?}");
         assert_eq!(got[2], 1.0);
+    }
+
+    /// Follows the finger (`presence = progress`), settles like `FADE`, and
+    /// draws a cover no other motion draws, so its use is visible.
+    #[derive(Clone)]
+    struct Track;
+    const TRACK_COVER: f32 = 0.25;
+
+    impl Motion for Track {
+        fn follow(&self, _current: f32, _toward: Final, progress: f32, _v: (f32, f32)) -> f32 {
+            progress
+        }
+        fn settle(
+            &self,
+            current: f32,
+            target: Final,
+            dt: Duration,
+            velocity: (f32, f32),
+            cfg: &NavConfig,
+        ) -> f32 {
+            FADE.settle(current, target, dt, velocity, cfg)
+        }
+        fn visual(&self, _presence: f32) -> Visual {
+            Visual { cover: TRACK_COVER }
+        }
+    }
+
+    fn mv(stack: &mut Stack, t0: Instant, n: u32, x: f32, y: f32) {
+        stack.handle(Input::Move {
+            contact: 1,
+            pos: pt(x, y),
+            t: t0 + STEP * n,
+        });
+    }
+
+    #[test]
+    fn mid_drag_visual_comes_from_the_following_motion() {
+        let mut stack = build(rest(home(true, drawer(Track))));
+        let t0 = Instant::now();
+        down(&mut stack, 1, HOME, pt(300.0, 800.0), t0);
+        mv(&mut stack, t0, 1, 300.0, 755.0);
+        assert_eq!(stack.state(DRAWER).presence, 0.5);
+        assert_eq!(stack.visual(DRAWER).cover, TRACK_COVER);
+    }
+
+    #[test]
+    fn a_container_left_by_the_axis_lock_settles_back_with_its_motion() {
+        let mut stack = build(rest(home(true, drawer(Track))));
+        let t0 = Instant::now();
+        down(&mut stack, 1, HOME, pt(300.0, 800.0), t0);
+        // Under the axis lock: the drawer follows.
+        mv(&mut stack, t0, 1, 300.0, 791.0);
+        assert_eq!(stack.state(DRAWER).presence, 0.1);
+        // Locks horizontal: the drawer's swipe is ignored from here on.
+        mv(&mut stack, t0, 2, 330.0, 791.0);
+        assert_eq!(stack.state(DRAWER).presence, 0.1);
+        stack.handle(Input::Tick { dt: STEP });
+        let p = stack.state(DRAWER).presence;
+        assert!((p - 0.05).abs() < 1e-6, "{p}");
+        stack.handle(Input::Tick { dt: STEP });
+        assert_eq!(stack.state(DRAWER).presence, 0.0);
+        assert_eq!(target(&stack, DRAWER), Final::Closed);
+    }
+
+    #[test]
+    fn cancel_after_movement_settles_back_to_the_target() {
+        let mut stack = build(rest(home(true, drawer(Track))));
+        let t0 = Instant::now();
+        down(&mut stack, 1, HOME, pt(300.0, 800.0), t0);
+        mv(&mut stack, t0, 1, 300.0, 755.0);
+        stack.handle(Input::Cancel);
+        assert_eq!(stack.state(DRAWER).presence, 0.5);
+        assert_eq!(target(&stack, DRAWER), Final::Closed);
+        assert_eq!(stack.animating(), [DRAWER]);
+        stack.handle(Input::Tick {
+            dt: Duration::from_millis(80),
+        });
+        assert_eq!(stack.state(DRAWER).presence, 0.0);
+        assert!(stack.animating().is_empty());
+    }
+
+    #[test]
+    fn a_bare_tap_does_not_freeze_a_running_fade() {
+        let home = home(false, drawer(INSTANT))
+            .close(swipe(BOTTOM_EDGE, Direction::Down, Timing::Any), FADE);
+        let mut stack = build(rest(home));
+        quick_bottom(&mut stack);
+        assert_eq!(stack.animating(), [HOME_ID]);
+        down(&mut stack, 1, BOTTOM_EDGE, pt(300.0, 10.0), Instant::now());
+        stack.handle(Input::Tick {
+            dt: Duration::from_millis(80),
+        });
+        assert_eq!(stack.state(HOME_ID).presence, 0.5);
+    }
+
+    #[test]
+    fn an_open_under_a_parent_closed_by_the_same_gesture_is_skipped() {
+        let home =
+            home(true, drawer(INSTANT)).close(swipe(HOME, Direction::Up, Timing::Any), INSTANT);
+        let mut stack = build(rest(home));
+        home_up(&mut stack);
+        assert!(open_ones(&stack).is_empty());
+        assert_eq!(stack.state(DRAWER).presence, 0.0);
+        assert!(settled(&stack));
+    }
+
+    /// Logs the velocity every `follow` and `settle` receives; settles like `FADE`.
+    #[derive(Clone, Default)]
+    struct Velocities {
+        follow: Rc<RefCell<Vec<(f32, f32)>>>,
+        settle: Rc<RefCell<Vec<(f32, f32)>>>,
+    }
+
+    impl Motion for Velocities {
+        fn follow(&self, current: f32, _toward: Final, _progress: f32, v: (f32, f32)) -> f32 {
+            self.follow.borrow_mut().push(v);
+            current
+        }
+        fn settle(
+            &self,
+            current: f32,
+            target: Final,
+            dt: Duration,
+            velocity: (f32, f32),
+            cfg: &NavConfig,
+        ) -> f32 {
+            self.settle.borrow_mut().push(velocity);
+            FADE.settle(current, target, dt, velocity, cfg)
+        }
+    }
+
+    fn near(a: (f32, f32), b: (f32, f32)) -> bool {
+        (a.0 - b.0).abs() < 1e-3 && (a.1 - b.1).abs() < 1e-3
+    }
+
+    #[test]
+    fn follow_gets_the_gesture_velocity_and_settle_the_release_velocity() {
+        let m = Velocities::default();
+        let mut stack = build(rest(home(true, drawer(m.clone()))));
+        home_up(&mut stack);
+        assert_eq!(target(&stack, DRAWER), Final::Open);
+        let follow = m.follow.borrow().clone();
+        assert!(!follow.is_empty());
+        assert!(follow.iter().all(|v| v.1 < 0.0), "upward: {follow:?}");
+        assert!(near(*follow.last().unwrap(), (0.0, -1.0)), "{follow:?}");
+        stack.handle(Input::Tick { dt: STEP });
+        stack.handle(Input::Tick { dt: STEP });
+        // The release settle and every tick after it get the release velocity.
+        let settle = m.settle.borrow().clone();
+        assert_eq!(settle.len(), 3, "{settle:?}");
+        assert!(settle.iter().all(|v| near(*v, (0.0, -1.0))), "{settle:?}");
     }
 
     #[test]

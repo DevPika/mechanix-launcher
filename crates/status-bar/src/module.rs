@@ -8,6 +8,12 @@ use crate::{BluetoothModule, UpowerModule, WifiModule, status_bar};
 ///
 /// Expects the host to have installed D-Bus and to have inserted the
 /// [`Atlas`], `FontBook` and [`StatusIcons`](crate::StatusIcons).
+///
+/// Build the status bar before adding this module (for example, add the
+/// `NavModule` whose container holds a [`StatusBarScreen`] first): the
+/// initial UPower reply is emitted straight to the
+/// [`StatusBar`](crate::StatusBar) widgets that exist at that point, so a
+/// bar built later misses it.
 pub struct StatusBarModule;
 
 impl Module for StatusBarModule {

@@ -24,11 +24,23 @@ pub struct Visual {
 }
 
 /// Together: `(input, current, final, dt) -> new current`, split by input kind.
+/// Velocities are px/ms, screen-down positive, as in `Gesture::velocity`.
 pub trait Motion: 'static {
-    fn follow(&self, current: f32, _toward: Final, _progress: f32) -> f32 {
+    /// While the finger is down: the trigger's progress (0 to 1) and the
+    /// gesture's velocity.
+    fn follow(&self, current: f32, _toward: Final, _progress: f32, _velocity: (f32, f32)) -> f32 {
         current
     }
-    fn settle(&self, current: f32, target: Final, dt: Duration, cfg: &NavConfig) -> f32;
+    /// Toward `target` by `dt`. `velocity` is the gesture's as it let go
+    /// of this container, or zero when no gesture drove it there.
+    fn settle(
+        &self,
+        current: f32,
+        target: Final,
+        dt: Duration,
+        velocity: (f32, f32),
+        cfg: &NavConfig,
+    ) -> f32;
     fn visual(&self, _presence: f32) -> Visual {
         Visual { cover: 0.0 }
     }
@@ -40,7 +52,14 @@ pub struct Snap;
 pub const INSTANT: Snap = Snap;
 
 impl Motion for Snap {
-    fn settle(&self, _current: f32, target: Final, _dt: Duration, _cfg: &NavConfig) -> f32 {
+    fn settle(
+        &self,
+        _current: f32,
+        target: Final,
+        _dt: Duration,
+        _velocity: (f32, f32),
+        _cfg: &NavConfig,
+    ) -> f32 {
         target.value()
     }
 }
@@ -51,7 +70,14 @@ pub struct Fade;
 pub const FADE: Fade = Fade;
 
 impl Motion for Fade {
-    fn settle(&self, current: f32, target: Final, dt: Duration, cfg: &NavConfig) -> f32 {
+    fn settle(
+        &self,
+        current: f32,
+        target: Final,
+        dt: Duration,
+        _velocity: (f32, f32),
+        cfg: &NavConfig,
+    ) -> f32 {
         let step = dt.as_secs_f32() / cfg.fade.as_secs_f32();
         let goal = target.value();
         if goal > current {
@@ -78,7 +104,7 @@ mod tests {
     #[test]
     fn instant_settles_immediately() {
         assert_eq!(
-            INSTANT.settle(0.3, Final::Open, MS(0), &NavConfig::default()),
+            INSTANT.settle(0.3, Final::Open, MS(0), (0.0, 0.0), &NavConfig::default()),
             1.0
         );
     }
@@ -86,7 +112,7 @@ mod tests {
     #[test]
     fn fade_advances_by_dt() {
         let cfg = NavConfig::default();
-        let v = FADE.settle(0.0, Final::Open, MS(80), &cfg);
+        let v = FADE.settle(0.0, Final::Open, MS(80), (0.0, 0.0), &cfg);
         assert_eq!(v, 0.5);
         assert_eq!(FADE.visual(v).cover, 0.5);
     }
@@ -95,11 +121,17 @@ mod tests {
     fn fade_clamps_large_dt() {
         let cfg = NavConfig::default();
         assert_eq!(
-            FADE.settle(0.9, Final::Open, Duration::from_secs(10), &cfg),
+            FADE.settle(0.9, Final::Open, Duration::from_secs(10), (0.0, 0.0), &cfg),
             1.0
         );
         assert_eq!(
-            FADE.settle(0.1, Final::Closed, Duration::from_secs(10), &cfg),
+            FADE.settle(
+                0.1,
+                Final::Closed,
+                Duration::from_secs(10),
+                (0.0, 0.0),
+                &cfg
+            ),
             0.0
         );
     }

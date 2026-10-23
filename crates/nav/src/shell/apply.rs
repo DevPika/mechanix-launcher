@@ -62,7 +62,15 @@ pub(crate) fn cover_paint(alpha: f32) -> Paint {
 
 /// Pushes the stack's state onto every container node, cover and window,
 /// and asks for a frame on each window with an animating container.
+/// Clears the tick clock once nothing animates, however the animation
+/// ended, so the next one starts from a zero tick.
 pub(crate) fn apply(app: &mut App) {
+    {
+        let mut nav = app.resource_mut::<Nav>();
+        if nav.stack.animating().is_empty() {
+            nav.last_tick = None;
+        }
+    }
     let (containers, windows, frames) = {
         let nav = app.resource::<Nav>();
         let containers: Vec<_> = nav

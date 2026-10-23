@@ -194,18 +194,27 @@ pub(crate) mod tests {
         })
     }
 
-    pub(crate) fn module(home_open: bool) -> NavModule {
+    /// Home with its drawer: opens with a quick bottom swipe and a fade.
+    pub(crate) fn home_spec(home_open: bool) -> ContainerSpec {
         let home = container(HOME, Label("Home"))
             .open(swipe(BOTTOM_EDGE, Direction::Up, Timing::Quick), FADE)
             .child(
                 container(DRAWER, Label("Drawer"))
                     .open_close(swipe(HOME_AREA, Direction::Up, Timing::Any), INSTANT),
             );
-        let home = if home_open {
+        if home_open {
             home.initially_open()
         } else {
             home
-        };
+        }
+    }
+
+    pub(crate) fn module(home_open: bool) -> NavModule {
+        module_with(home_spec(home_open))
+    }
+
+    /// The test windows, with `home` as the home window's container.
+    pub(crate) fn module_with(home: ContainerSpec) -> NavModule {
         NavModule::new(NavConfig::default())
             .window(
                 nav_window(

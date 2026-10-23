@@ -1,7 +1,7 @@
-use mecha_wayland::mechanix_widgets::prelude::FontBook;
-use mecha_wayland::prelude::*;
 use app_drawer::AppDrawer;
 use home::Home;
+use mecha_wayland::mechanix_widgets::prelude::FontBook;
+use mecha_wayland::prelude::*;
 use nav::core::{
     AreaId, BOTTOM_EDGE, ContainerId, Direction, FADE, INSTANT, NavConfig, Span, TOP_EDGE, Timing,
     container, swipe,
