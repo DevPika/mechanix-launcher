@@ -372,6 +372,7 @@ dependencies = [
  "app-drawer",
  "home",
  "mecha-wayland",
+ "nav",
  "notifications",
  "quick-settings",
  "running-apps",

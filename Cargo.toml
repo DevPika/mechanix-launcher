@@ -13,6 +13,7 @@ search.workspace = true
 running-apps.workspace = true
 notifications.workspace = true
 quick-settings.workspace = true
+nav.workspace = true
 
 [workspace]
 members = [

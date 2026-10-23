@@ -1,6 +1,135 @@
 use mecha_wayland::mechanix_widgets::prelude::FontBook;
 use mecha_wayland::prelude::*;
-use status_bar::{DEFAULT_ICON_SIZE, GEIST_MONO_BYTES, StatusBarModule, StatusIcons};
+use app_drawer::AppDrawer;
+use home::Home;
+use nav::core::{
+    AreaId, BOTTOM_EDGE, ContainerId, Direction, FADE, INSTANT, NavConfig, Span, TOP_EDGE, Timing,
+    container, swipe,
+};
+use nav::shell::{NavModule, nav_window};
+use notifications::Notifications;
+use quick_settings::QuickSettings;
+use running_apps::RunningApps;
+use search::Search;
+use status_bar::{
+    DEFAULT_BAR_HEIGHT, DEFAULT_ICON_SIZE, GEIST_MONO_BYTES, StatusBarModule, StatusBarScreen,
+    StatusIcons,
+};
+
+const HOME: AreaId = AreaId("home");
+const RUNNING_APPS: AreaId = AreaId("running-apps");
+const PANEL: AreaId = AreaId("panel");
+const STATUS_BAR: AreaId = AreaId("status-bar");
+
+const HOME_ID: ContainerId = ContainerId("home");
+const DRAWER: ContainerId = ContainerId("drawer");
+const SEARCH: ContainerId = ContainerId("search");
+const RUNNING: ContainerId = ContainerId("running");
+const NOTIFICATIONS: ContainerId = ContainerId("notifications");
+const QUICK_SETTINGS: ContainerId = ContainerId("quick_settings");
+const STATUS: ContainerId = ContainerId("status");
+
+const ALL_SIDES: Anchor = Anchor::from_bits_truncate(
+    Anchor::TOP.bits() | Anchor::BOTTOM.bits() | Anchor::LEFT.bits() | Anchor::RIGHT.bits(),
+);
+
+fn role(layer: Layer, anchor: Anchor, exclusive_zone: i32, namespace: &str) -> Role {
+    Role::Layer(LayerRole {
+        layer,
+        anchor,
+        exclusive_zone,
+        namespace: namespace.into(),
+        keyboard_interactivity: KeyboardInteractivity::None,
+    })
+}
+
+fn bottom_quick() -> nav::core::Swipe {
+    swipe(BOTTOM_EDGE, Direction::Up, Timing::Quick)
+}
+
+/// A panel that pulls down from its half of the top edge and closes on an up swipe.
+fn panel(id: ContainerId, screen: impl screen::Screen, span: Span) -> nav::core::ContainerSpec {
+    container(id, screen)
+        .open(
+            swipe(TOP_EDGE, Direction::Down, Timing::Any).span(span),
+            INSTANT,
+        )
+        .close(swipe(PANEL, Direction::Up, Timing::Any), INSTANT)
+}
+
+fn navigation(cfg: NavConfig) -> NavModule {
+    let strip = LayoutStyle::default().height(px(cfg.bottom_strip_height));
+    let bar = LayoutStyle::default().height(px(DEFAULT_BAR_HEIGHT));
+    let sides = Anchor::LEFT | Anchor::RIGHT;
+
+    let home = container(HOME_ID, Home)
+        .open(bottom_quick(), FADE)
+        .child(
+            container(DRAWER, AppDrawer)
+                .open_close(swipe(HOME, Direction::Up, Timing::Any), INSTANT)
+                .close(bottom_quick(), INSTANT),
+        )
+        .child(
+            container(SEARCH, Search)
+                .open_close(swipe(HOME, Direction::Right, Timing::Any), INSTANT)
+                .close(bottom_quick(), INSTANT),
+        )
+        .initially_open();
+    let running = container(RUNNING, RunningApps)
+        .open(swipe(BOTTOM_EDGE, Direction::Up, Timing::Held), INSTANT)
+        .close(bottom_quick(), INSTANT);
+
+    NavModule::new(cfg)
+        .window(
+            nav_window(
+                HOME,
+                role(Layer::Top, ALL_SIDES, 0, "home"),
+                LayoutStyle::default(),
+            )
+            .container(home),
+        )
+        .window(
+            nav_window(
+                RUNNING_APPS,
+                role(Layer::Top, ALL_SIDES, 0, "running-apps"),
+                LayoutStyle::default(),
+            )
+            .container(running),
+        )
+        .window(nav_window(
+            BOTTOM_EDGE,
+            role(Layer::Top, Anchor::BOTTOM | sides, 0, "bottom-edge"),
+            strip,
+        ))
+        .window(
+            nav_window(
+                PANEL,
+                role(Layer::Top, ALL_SIDES, 0, "panel"),
+                LayoutStyle::default(),
+            )
+            .container(panel(NOTIFICATIONS, Notifications, Span::LeftHalf))
+            .container(panel(QUICK_SETTINGS, QuickSettings, Span::RightHalf)),
+        )
+        .window(nav_window(
+            TOP_EDGE,
+            role(Layer::Overlay, Anchor::TOP | sides, -1, "top-edge"),
+            bar.clone(),
+        ))
+        .window(
+            nav_window(
+                STATUS_BAR,
+                role(
+                    Layer::Overlay,
+                    Anchor::TOP | sides,
+                    DEFAULT_BAR_HEIGHT as i32,
+                    "status-bar",
+                ),
+                bar,
+            )
+            .container(container(STATUS, StatusBarScreen).initially_open())
+            .no_input(),
+        )
+}
 
 fn main() {
     let mut app = App::new();
@@ -39,7 +168,8 @@ fn main() {
             budget: Budget::default(),
         });
 
-    app.add_module(StatusBarModule);
+    app.add_module(navigation(NavConfig::default()))
+        .add_module(StatusBarModule);
 
     app.run();
 }
