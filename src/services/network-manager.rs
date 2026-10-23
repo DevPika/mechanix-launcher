@@ -5,11 +5,20 @@ use std::collections::HashMap;
 const NM: &str = "org.freedesktop.NetworkManager";
 const NM_MAIN_OBJ: &str = "/org/freedesktop/NetworkManager";
 
-enum CallType {
-    GetAll, // GetAll on NM_MAIN_OBJ
+// enum
+mod nm_device_type {
+    type EType = u32;
+    const UNKNOWN: EType = 0;
+    const WIFI: EType = 2;
 }
 
-#[derive(Default)]
+enum CallType {
+    GetAll, // GetAll on NM_MAIN_OBJ
+    /// GetAll on ObjectPath of a a device
+    /// Use to determine ActiveConnection and DeviceType
+    DeviceProperties(ObjectPath),
+}
+
 pub struct NMState {
     /// is networking enabled
     pub networking_enabled: bool,
@@ -19,6 +28,15 @@ pub struct NMState {
     /// only relevant if networking_enabled and wireless_hardware_enabled are
     /// also true. Toggle this on and off in DBus to enable and disable wifi
     pub wireless_enabled: bool,
+    /// Match for main-object PropertiesChanged on the NetworkManager interface.
+    /// Take and unregister this match when clearing subscriptions for rediscovery.
+    properties_changed: Option<MatchId>,
+    /// Match for DeviceAdded on the NetworkManager main object.
+    /// Take and unregister this match when clearing subscriptions for rediscovery.
+    device_added: Option<MatchId>,
+    /// Match for DeviceRemoved on the NetworkManager main object.
+    /// Take and unregister this match when clearing subscriptions for rediscovery.
+    device_removed: Option<MatchId>,
     pending: HashMap<CallId, CallType>,
 }
 impl Resource for NMState {}
@@ -26,14 +44,37 @@ impl Resource for NMState {}
 pub struct NetworkManagerModule;
 impl Module for NetworkManagerModule {
     fn install(self, app: &mut App) {
-        app.insert_resource(NMState::default());
+        let (properties_changed, device_added, device_removed, call) = {
+            let mut dbus = app.resource_mut::<DBus>();
+            let mut bus = dbus.system();
+            let properties_changed = bus.watch_properties(NM, NM_MAIN_OBJ, NM);
+            let device_added = bus.add_match(
+                MatchRule::signal()
+                    .sender(NM)
+                    .path(NM_MAIN_OBJ)
+                    .interface(NM)
+                    .member("DeviceAdded"),
+            );
+            let device_removed = bus.add_match(
+                MatchRule::signal()
+                    .sender(NM)
+                    .path(NM_MAIN_OBJ)
+                    .interface(NM)
+                    .member("DeviceRemoved"),
+            );
+            let call = bus.object(NM, NM_MAIN_OBJ).get_all(NM);
+            (properties_changed, device_added, device_removed, call)
+        };
 
-        let mut dbus = app.resource_mut::<DBus>();
-        let call = dbus.system().object(NM, NM_MAIN_OBJ).get_all(NM);
-
-        app.resource_mut::<NMState>()
-            .pending
-            .insert(call, CallType::GetAll);
+        app.insert_resource(NMState {
+            networking_enabled: false,
+            wireless_hardware_enabled: false,
+            wireless_enabled: false,
+            properties_changed: Some(properties_changed),
+            device_added: Some(device_added),
+            device_removed: Some(device_removed),
+            pending: HashMap::from([(call, CallType::GetAll)]),
+        });
         app.system(on_method_reply);
     }
 }
@@ -72,14 +113,19 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 }
             };
 
+            // read necessary state
             state.networking_enabled = unwrap_property(&properties, "NetworkingEnabled");
             state.wireless_hardware_enabled =
                 unwrap_property(&properties, "WirelessHardwareEnabled");
             state.wireless_enabled = unwrap_property(&properties, "WirelessEnabled");
+
+            // Request all properties on devices
         }
+        _ => {}
     }
 }
 
+/// Helper function
 /// Decode a property, logging and returning its default if missing or invalid.
 fn unwrap_property<T: Decode + Type + Default>(properties: &PropMap, name: &str) -> T {
     match properties.get_as::<T>(name) {
