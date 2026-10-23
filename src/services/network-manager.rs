@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 const NM: &str = "org.freedesktop.NetworkManager";
 const NM_MAIN_OBJ: &str = "/org/freedesktop/NetworkManager";
+const NM_DEVICE: &str = "org.freedesktop.NetworkManager.Device";
 
 // enum
 mod nm_device_type {
@@ -120,6 +121,17 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
             state.wireless_enabled = unwrap_property(&properties, "WirelessEnabled");
 
             // Request all properties on devices
+            let devices: Vec<ObjectPath> = unwrap_property(&properties, "Devices");
+            for path in devices {
+                let call = app
+                    .resource_mut::<DBus>()
+                    .system()
+                    .object(NM, path.clone())
+                    .get_all(NM_DEVICE);
+                app.resource_mut::<NMState>()
+                    .pending
+                    .insert(call, CallType::DeviceProperties(path));
+            }
         }
         _ => {}
     }
