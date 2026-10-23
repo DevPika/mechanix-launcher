@@ -89,6 +89,10 @@ impl Module for NavModule {
                 root_window.insert(c.id, i);
                 roots.push(c);
             }
+            let layer = match &w.role {
+                Role::Layer(l) => Some(l.layer),
+                Role::Toplevel => None,
+            };
             let node = app
                 .spawn_with(
                     root,
@@ -101,6 +105,7 @@ impl Module for NavModule {
                 .id();
             windows.push(NavWindow {
                 node,
+                layer,
                 area: w.area,
                 containers: Vec::new(),
                 no_input: w.no_input,
@@ -168,6 +173,7 @@ pub(crate) mod tests {
         AreaId, BOTTOM_EDGE, ContainerId, Direction, FADE, INSTANT, Input, NavConfig, Timing,
         container, swipe,
     };
+    use crate::shell::apply::window_layers;
     use crate::shell::apply::{Nav, apply};
 
     pub(crate) const HOME_AREA: AreaId = AreaId("home");
@@ -322,6 +328,27 @@ pub(crate) mod tests {
                 (Layer::Bottom, "home".to_string()),
                 (Layer::Top, "bottom-edge".to_string()),
                 (Layer::Overlay, "panel".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn hidden_windows_go_to_background_visible_to_their_own_layer() {
+        let app = app_with(module(true));
+        let nav = app.resource::<Nav>();
+        let w = |i: usize| nav.windows[i].node;
+        // Home is open; the panel is closed; the strip is never asked.
+        assert_eq!(
+            window_layers(nav),
+            vec![(w(0), Layer::Bottom), (w(2), Layer::Background)]
+        );
+        let app = app_with(module(false));
+        let nav = app.resource::<Nav>();
+        assert_eq!(
+            window_layers(nav),
+            vec![
+                (nav.windows[0].node, Layer::Background),
+                (nav.windows[2].node, Layer::Background)
             ]
         );
     }

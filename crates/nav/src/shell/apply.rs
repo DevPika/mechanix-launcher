@@ -11,6 +11,8 @@ pub(crate) struct NavWindow {
     pub(crate) node: NodeId,
     /// The area its touches are tagged with.
     pub(crate) area: AreaId,
+    /// The layer the window was spawned in; `None` for a toplevel.
+    pub(crate) layer: Option<Layer>,
     /// Every container in this window, children included, in z order.
     pub(crate) containers: Vec<ContainerId>,
     /// Takes no input: gets an empty input region on its first `Resized`.
@@ -60,8 +62,26 @@ pub(crate) fn cover_paint(alpha: f32) -> Paint {
     })
 }
 
+/// The layer each window with containers is to be in: its own while any
+/// of its containers is visible, otherwise `Layer::Background`. Windows
+/// without containers (the strips) and toplevels are left out.
+pub(crate) fn window_layers(nav: &Nav) -> Vec<(NodeId, Layer)> {
+    nav.windows
+        .iter()
+        .filter(|w| !w.containers.is_empty())
+        .filter_map(|w| {
+            let own = w.layer?;
+            let shown = w.containers.iter().any(|id| nav.stack.state(*id).visible());
+            Some((w.node, if shown { own } else { Layer::Background }))
+        })
+        .collect()
+}
+
 /// Pushes the stack's state onto every container node, cover and window,
 /// and asks for a frame on each window with an animating container.
+/// A window with no visible container is not unmapped but moved to
+/// `Layer::Background`, and back to its own layer when shown; hidden
+/// windows stay mapped there and Home covers them this round.
 /// Clears the tick clock once nothing animates, however the animation
 /// ended, so the next one starts from a zero tick.
 pub(crate) fn apply(app: &mut App) {
@@ -85,16 +105,7 @@ pub(crate) fn apply(app: &mut App) {
                 (c.node, c.cover, display, nav.stack.visual(c.id).cover)
             })
             .collect();
-        // Windows without containers (the strips) are never touched.
-        let windows: Vec<_> = nav
-            .windows
-            .iter()
-            .filter(|w| !w.containers.is_empty())
-            .map(|w| {
-                let mapped = w.containers.iter().any(|id| nav.stack.state(*id).visible());
-                (w.node, mapped)
-            })
-            .collect();
+        let windows = window_layers(nav);
         let mut frames: Vec<NodeId> = Vec::new();
         for id in nav.stack.animating() {
             let window = nav.windows[nav.container(id).window].node;
@@ -117,13 +128,11 @@ pub(crate) fn apply(app: &mut App) {
 
     if app.has_resource::<Surfaces>() {
         let (mut surfaces, mut wl) = app.query::<(ResMut<Surfaces>, ResMut<Wayland>)>();
-        for (window, mapped) in windows {
-            // A window spawned this tick has no entry yet and reads as
-            // unmapped, so hiding is always sent (a no-op once hidden):
-            // that is what makes a fresh window start hidden.
-            if !mapped || !surfaces.is_mapped(window) {
-                surfaces.set_mapped(window, mapped, &mut wl);
-            }
+        // Asking every apply is fine: the same layer sends nothing, and
+        // a window spawned this tick has no entry yet, so it starts in
+        // the requested layer with no flash.
+        for (window, layer) in windows {
+            surfaces.set_layer(window, layer, &mut wl);
         }
     }
 
