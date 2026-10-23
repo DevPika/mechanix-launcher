@@ -35,6 +35,7 @@ pub trait Motion: 'static {
 }
 
 /// Jumps straight to the target.
+#[derive(Clone, Copy)]
 pub struct Snap;
 pub const INSTANT: Snap = Snap;
 
@@ -45,6 +46,7 @@ impl Motion for Snap {
 }
 
 /// Fades linearly over `cfg.fade`.
+#[derive(Clone, Copy)]
 pub struct Fade;
 pub const FADE: Fade = Fade;
 
