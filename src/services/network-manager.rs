@@ -10,7 +10,7 @@ const NM_DEVICE: &str = "org.freedesktop.NetworkManager.Device";
 mod nm_device_type {
     type EType = u32;
     const UNKNOWN: EType = 0;
-    const WIFI: EType = 2;
+    pub(super) const WIFI: EType = 2;
 }
 
 enum CallType {
@@ -18,6 +18,11 @@ enum CallType {
     /// GetAll on ObjectPath of a a device
     /// Use to determine ActiveConnection and DeviceType
     DeviceProperties(ObjectPath),
+}
+
+struct WifiDevice {
+    /// Object path of the Wi-Fi device.
+    path: ObjectPath,
 }
 
 pub struct NMState {
@@ -29,6 +34,8 @@ pub struct NMState {
     /// only relevant if networking_enabled and wireless_hardware_enabled are
     /// also true. Toggle this on and off in DBus to enable and disable wifi
     pub wireless_enabled: bool,
+    /// Discovered Wi-Fi devices, unique by object path.
+    wifi_devices: Vec<WifiDevice>,
     /// Match for main-object PropertiesChanged on the NetworkManager interface.
     /// Take and unregister this match when clearing subscriptions for rediscovery.
     properties_changed: Option<MatchId>,
@@ -71,6 +78,7 @@ impl Module for NetworkManagerModule {
             networking_enabled: false,
             wireless_hardware_enabled: false,
             wireless_enabled: false,
+            wifi_devices: Vec::new(),
             properties_changed: Some(properties_changed),
             device_added: Some(device_added),
             device_removed: Some(device_removed),
@@ -133,7 +141,32 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                     .insert(call, CallType::DeviceProperties(path));
             }
         }
-        _ => {}
+        CallType::DeviceProperties(path) => {
+            let (properties,) = match message.body::<(PropMap,)>() {
+                Ok(body) => body,
+                Err(error) => {
+                    eprintln!("NetworkManager: invalid device GetAll reply: {error:?}");
+                    return;
+                }
+            };
+
+            let device_type: u32 = unwrap_property(&properties, "DeviceType");
+            if device_type != nm_device_type::WIFI {
+                return;
+            }
+
+            /*
+            This guard exists because we might receive a DeviceAdded before the
+            initial Manager's GetAll.
+
+            When that happens, we basically don't need to do extra work here by
+            re-requesting ActiveConnection and this also allows DeviceAdded to
+            blindly push without checking first.
+            */
+            if !state.wifi_devices.iter().any(|device| device.path == path) {
+                state.wifi_devices.push(WifiDevice { path });
+            }
+        }
     }
 }
 
