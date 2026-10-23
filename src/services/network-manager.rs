@@ -1,3 +1,4 @@
+use mecha_wayland::dbus::{Decode, Type};
 use mecha_wayland::prelude::*;
 use std::collections::HashMap;
 
@@ -14,6 +15,10 @@ pub struct NMState {
     pub networking_enabled: bool,
     /// if wireless hardware is enabled (useful for kill switch)
     pub wireless_hardware_enabled: bool,
+    /// if wireless networking is enabled
+    /// only relevant if networking_enabled and wireless_hardware_enabled are
+    /// also true. Toggle this on and off in DBus to enable and disable wifi
+    pub wireless_enabled: bool,
     pending: HashMap<CallId, CallType>,
 }
 impl Resource for NMState {}
@@ -67,31 +72,25 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 }
             };
 
-            app.resource_mut::<NMState>().networking_enabled =
-                match properties.get_as::<bool>("NetworkingEnabled") {
-                    Some(Ok(enabled)) => enabled,
-                    Some(Err(error)) => {
-                        eprintln!("NetworkManager: invalid NetworkingEnabled: {error:?}");
-                        false
-                    }
-                    None => {
-                        eprintln!("NetworkManager: missing NetworkingEnabled");
-                        false
-                    }
-                };
+            state.networking_enabled = unwrap_property(&properties, "NetworkingEnabled");
+            state.wireless_hardware_enabled =
+                unwrap_property(&properties, "WirelessHardwareEnabled");
+            state.wireless_enabled = unwrap_property(&properties, "WirelessEnabled");
+        }
+    }
+}
 
-            app.resource_mut::<NMState>().wireless_hardware_enabled =
-                match properties.get_as::<bool>("WirelessHardwareEnabled") {
-                    Some(Ok(enabled)) => enabled,
-                    Some(Err(error)) => {
-                        eprintln!("NetworkManager: invalid WirelessHardwareEnabled: {error:?}");
-                        false
-                    }
-                    None => {
-                        eprintln!("NetworkManager: missing WirelessHardwareEnabled");
-                        false
-                    }
-                };
+/// Decode a property, logging and returning its default if missing or invalid.
+fn unwrap_property<T: Decode + Type + Default>(properties: &PropMap, name: &str) -> T {
+    match properties.get_as::<T>(name) {
+        Some(Ok(value)) => value,
+        Some(Err(error)) => {
+            eprintln!("NetworkManager: invalid {name}: {error:?}");
+            T::default()
+        }
+        None => {
+            eprintln!("NetworkManager: missing {name}");
+            T::default()
         }
     }
 }
