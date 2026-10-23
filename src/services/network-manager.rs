@@ -7,10 +7,6 @@ const NM_MAIN_OBJ: &str = "/org/freedesktop/NetworkManager";
 enum CallType {
     GetAll, // GetAll on NM_MAIN_OBJ
 }
-struct NMBookKeeping {
-    pending: HashMap<CallId, CallType>,
-}
-impl Resource for NMBookKeeping {}
 
 #[derive(Default)]
 pub struct NMState {
@@ -18,6 +14,7 @@ pub struct NMState {
     pub networking_enabled: bool,
     /// if wireless hardware is enabled (useful for kill switch)
     pub wireless_hardware_enabled: bool,
+    pending: HashMap<CallId, CallType>,
 }
 impl Resource for NMState {}
 
@@ -25,14 +22,11 @@ pub struct NetworkManagerModule;
 impl Module for NetworkManagerModule {
     fn install(self, app: &mut App) {
         app.insert_resource(NMState::default());
-        app.insert_resource(NMBookKeeping {
-            pending: HashMap::new(),
-        });
 
         let mut dbus = app.resource_mut::<DBus>();
         let call = dbus.system().object(NM, NM_MAIN_OBJ).get_all(NM);
 
-        app.resource_mut::<NMBookKeeping>()
+        app.resource_mut::<NMState>()
             .pending
             .insert(call, CallType::GetAll);
         app.system(on_method_reply);
@@ -40,8 +34,8 @@ impl Module for NetworkManagerModule {
 }
 
 fn on_method_reply(app: &mut App, event: &MethodReply) {
-    let mut book_keeper = app.resource_mut::<NMBookKeeping>();
-    let Some(call_type) = book_keeper.pending.remove(&event.call) else {
+    let mut state = app.resource_mut::<NMState>();
+    let Some(call_type) = state.pending.remove(&event.call) else {
         return; // another module's DBus call
     };
 
@@ -53,7 +47,7 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 || error.is("org.freedesktop.DBus.Error.NameHasNoOwner") =>
         {
             eprintln!("NetworkManager unavailable, clearing all pending calls");
-            book_keeper.pending.clear();
+            state.pending.clear();
             return;
         }
         Err(error) => {
