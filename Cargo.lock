@@ -491,6 +491,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nav"
+version = "0.1.0"
+dependencies = [
+ "gestures",
+ "mecha-wayland",
+ "screen",
+]
+
+[[package]]
 name = "notifications"
 version = "0.1.0"
 dependencies = [

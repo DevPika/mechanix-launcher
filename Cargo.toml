@@ -26,6 +26,7 @@ members = [
     "crates/running-apps",
     "crates/notifications",
     "crates/quick-settings",
+    "crates/nav",
 ]
 resolver = "3"
 
@@ -40,6 +41,7 @@ search = { path = "crates/search" }
 running-apps = { path = "crates/running-apps" }
 notifications = { path = "crates/notifications" }
 quick-settings = { path = "crates/quick-settings" }
+nav = { path = "crates/nav" }
 
 # Local development override — assumes mecha-wayland is cloned as a sibling
 # directory: ../mecha-wayland

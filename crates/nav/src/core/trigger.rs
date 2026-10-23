@@ -1,0 +1,272 @@
+use gestures::Axis;
+
+use super::config::NavConfig;
+use super::gesture::{Detect, Gesture, Phase};
+use super::AreaId;
+
+/// Events from outside the touch stream. None exist yet.
+#[non_exhaustive]
+pub enum ExternalEvent {}
+
+pub trait Trigger: 'static {
+    fn area(&self) -> AreaId;
+    fn detect(&self, g: &Gesture, phase: Phase, cfg: &NavConfig) -> Detect;
+    fn on_external(&self, _e: &ExternalEvent) -> bool {
+        false
+    }
+    fn mirrored(&self) -> Option<Box<dyn Trigger>> {
+        None
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl Direction {
+    fn opposite(self) -> Self {
+        match self {
+            Direction::Up => Direction::Down,
+            Direction::Down => Direction::Up,
+            Direction::Left => Direction::Right,
+            Direction::Right => Direction::Left,
+        }
+    }
+
+    fn axis(self) -> Axis {
+        match self {
+            Direction::Up | Direction::Down => Axis::Vertical,
+            Direction::Left | Direction::Right => Axis::Horizontal,
+        }
+    }
+
+    /// Projects a screen-space (dx, dy) so that movement along `self` is positive.
+    fn along(self, (x, y): (f32, f32)) -> f32 {
+        match self {
+            Direction::Up => -y,
+            Direction::Down => y,
+            Direction::Left => -x,
+            Direction::Right => x,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Timing {
+    Any,
+    Quick,
+    Held,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Span {
+    Whole,
+    LeftHalf,
+    RightHalf,
+}
+
+#[derive(Clone, Copy)]
+pub struct Swipe {
+    pub area: AreaId,
+    pub dir: Direction,
+    pub timing: Timing,
+    pub span: Span,
+}
+
+pub const fn swipe(area: AreaId, dir: Direction, timing: Timing) -> Swipe {
+    Swipe { area, dir, timing, span: Span::Whole }
+}
+
+impl Swipe {
+    pub const fn span(self, span: Span) -> Swipe {
+        Swipe { span, ..self }
+    }
+
+    fn starts_in_span(&self, g: &Gesture) -> bool {
+        let half = g.area_size.width / 2.0;
+        match self.span {
+            Span::Whole => true,
+            Span::LeftHalf => g.start.x < half,
+            Span::RightHalf => g.start.x >= half,
+        }
+    }
+}
+
+impl Trigger for Swipe {
+    fn area(&self) -> AreaId {
+        self.area
+    }
+
+    fn detect(&self, g: &Gesture, phase: Phase, cfg: &NavConfig) -> Detect {
+        if !self.starts_in_span(g) || g.axis.is_some_and(|a| a != self.dir.axis()) {
+            return Detect::Ignore;
+        }
+        let needed = match self.timing {
+            Timing::Any => cfg.swipe_commit_px,
+            Timing::Quick | Timing::Held => cfg.min_travel_px,
+        };
+        let travel = self.dir.along(g.delta());
+        match phase {
+            Phase::Moving => Detect::Progress((travel / needed).clamp(0.0, 1.0)),
+            Phase::Released => {
+                let held = g.elapsed >= cfg.hold_time
+                    && self.dir.along(g.velocity) < cfg.flick_px_per_ms;
+                let timing_ok = match self.timing {
+                    Timing::Any => true,
+                    Timing::Held => held,
+                    Timing::Quick => !held,
+                };
+                if travel >= needed && timing_ok {
+                    Detect::Commit
+                } else {
+                    Detect::Cancel
+                }
+            }
+        }
+    }
+
+    fn mirrored(&self) -> Option<Box<dyn Trigger>> {
+        Some(Box::new(Swipe { dir: self.dir.opposite(), ..*self }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use mecha_wayland::prelude::{Point, Size};
+
+    use super::*;
+    use crate::core::{BOTTOM_EDGE, TOP_EDGE};
+
+    fn gesture(
+        area_size: Size,
+        start: Point,
+        end: Point,
+        elapsed_ms: u64,
+        velocity: (f32, f32),
+    ) -> Gesture {
+        Gesture {
+            area: BOTTOM_EDGE,
+            area_size,
+            start,
+            pos: end,
+            elapsed: Duration::from_millis(elapsed_ms),
+            velocity,
+            axis: None,
+        }
+    }
+
+    fn up(dy: f32, ms: u64, vy: f32) -> Gesture {
+        gesture(
+            Size { width: 600.0, height: 20.0 },
+            Point { x: 300.0, y: 10.0 },
+            Point { x: 300.0, y: 10.0 + dy },
+            ms,
+            (0.0, vy),
+        )
+    }
+
+    fn down(dy: f32) -> Gesture {
+        gesture(
+            Size { width: 600.0, height: 20.0 },
+            Point { x: 300.0, y: 0.0 },
+            Point { x: 300.0, y: dy },
+            100,
+            (0.0, 0.0),
+        )
+    }
+
+    fn run(t: Swipe, g: &Gesture, p: Phase) -> Detect {
+        t.detect(g, p, &NavConfig::default())
+    }
+
+    const QUICK: Swipe = swipe(BOTTOM_EDGE, Direction::Up, Timing::Quick);
+    const HELD: Swipe = swipe(BOTTOM_EDGE, Direction::Up, Timing::Held);
+
+    #[test]
+    fn quick_up_commits_quick_not_held() {
+        let g = up(-80.0, 100, -1.5);
+        assert_eq!(run(QUICK, &g, Phase::Released), Detect::Commit);
+        assert_eq!(run(HELD, &g, Phase::Released), Detect::Cancel);
+    }
+
+    #[test]
+    fn slow_up_commits_held() {
+        let g = up(-80.0, 400, -0.2);
+        assert_eq!(run(HELD, &g, Phase::Released), Detect::Commit);
+        assert_eq!(run(QUICK, &g, Phase::Released), Detect::Cancel);
+    }
+
+    #[test]
+    fn swipe_and_hold_commits_held() {
+        let g = up(-120.0, 600, 0.0);
+        assert_eq!(run(HELD, &g, Phase::Released), Detect::Commit);
+    }
+
+    #[test]
+    fn short_travel_cancels() {
+        let g = up(-40.0, 100, -1.5);
+        assert_eq!(run(QUICK, &g, Phase::Released), Detect::Cancel);
+        assert_eq!(run(HELD, &g, Phase::Released), Detect::Cancel);
+    }
+
+    #[test]
+    fn any_needs_90px() {
+        let t = swipe(TOP_EDGE, Direction::Down, Timing::Any);
+        assert_eq!(run(t, &down(89.0), Phase::Released), Detect::Cancel);
+        assert_eq!(run(t, &down(90.0), Phase::Released), Detect::Commit);
+    }
+
+    #[test]
+    fn progress_is_travel_over_needed() {
+        let t = swipe(TOP_EDGE, Direction::Down, Timing::Any);
+        assert_eq!(run(t, &down(45.0), Phase::Moving), Detect::Progress(0.5));
+        assert_eq!(run(t, &down(200.0), Phase::Moving), Detect::Progress(1.0));
+    }
+
+    #[test]
+    fn span_filters_by_start_x() {
+        let g = gesture(
+            Size { width: 600.0, height: 20.0 },
+            Point { x: 100.0, y: 0.0 },
+            Point { x: 100.0, y: 100.0 },
+            100,
+            (0.0, 0.0),
+        );
+        let base = swipe(TOP_EDGE, Direction::Down, Timing::Any);
+        assert_eq!(run(base.span(Span::RightHalf), &g, Phase::Released), Detect::Ignore);
+        assert_eq!(run(base.span(Span::LeftHalf), &g, Phase::Released), Detect::Commit);
+    }
+
+    #[test]
+    fn locked_other_axis_ignores() {
+        let mut g = up(-80.0, 100, -1.5);
+        g.axis = Some(Axis::Horizontal);
+        assert_eq!(run(QUICK, &g, Phase::Moving), Detect::Ignore);
+    }
+
+    #[test]
+    fn mirrored_flips_direction() {
+        let t = swipe(TOP_EDGE, Direction::Down, Timing::Quick).span(Span::LeftHalf);
+        let m = t.mirrored().unwrap();
+        assert_eq!(m.area(), TOP_EDGE);
+        // An Up swipe of the mirrored trigger commits where the original cancels.
+        let g = gesture(
+            Size { width: 600.0, height: 20.0 },
+            Point { x: 100.0, y: 100.0 },
+            Point { x: 100.0, y: 0.0 },
+            100,
+            (0.0, -1.5),
+        );
+        let cfg = NavConfig::default();
+        assert_eq!(m.detect(&g, Phase::Released, &cfg), Detect::Commit);
+        assert_eq!(t.detect(&g, Phase::Released, &cfg), Detect::Cancel);
+        let mm = Swipe { dir: Direction::Up, ..t }.mirrored().unwrap();
+        assert_eq!(mm.detect(&g, Phase::Released, &cfg), Detect::Cancel);
+    }
+}
