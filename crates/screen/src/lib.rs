@@ -1,22 +1,16 @@
 use mecha_wayland::mechanix_widgets::prelude::{TextVariant, text};
 use mecha_wayland::prelude::*;
 
-/// One navigation section of the dock. Each section lives in its own crate and
-/// the dock holds them as `Vec<Box<dyn Section>>`, so this trait must stay
-/// object-safe.
-pub trait Section: 'static {
-    /// Stable identifier, e.g. "favourites", "search", "recents",
-    /// "notifications", "quick-settings".
-    fn id(&self) -> &'static str;
-    /// Human-readable name, e.g. "Favourites", "Recent Apps".
-    fn label(&self) -> &'static str;
-    /// Phosphor fill SVG bytes for the dock icon.
-    fn icon_svg(&self) -> &'static [u8];
-    /// Spawns this section's page under `parent` and returns its root node.
-    fn spawn_page(&self, app: &mut App, parent: NodeId) -> NodeId;
+/// A full-size piece of launcher content. A screen builds itself under any
+/// parent node and owns no window, so the nav can place it in whichever window
+/// it likes. Screens live in their own crates and are held as
+/// `Box<dyn Screen>`, so this trait must stay object-safe.
+pub trait Screen: 'static {
+    /// Builds this screen under `parent` and returns its root node.
+    fn build(&self, app: &mut App, parent: NodeId) -> NodeId;
 }
 
-/// Spawns a themed full-size page showing `label` centred. Used by sections
+/// Spawns a themed full-size page showing `label` centred. Used by screens
 /// that have no real page yet.
 pub fn placeholder_page(app: &mut App, parent: NodeId, label: &str) -> NodeId {
     app.spawn(
@@ -86,7 +80,7 @@ mod tests {
     }
 
     #[test]
-    fn section_is_object_safe() {
-        fn _takes(_: Vec<Box<dyn Section>>) {}
+    fn screen_is_object_safe() {
+        fn _takes(_: Vec<Box<dyn Screen>>) {}
     }
 }

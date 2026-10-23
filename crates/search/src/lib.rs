@@ -1,36 +1,41 @@
 use mecha_wayland::prelude::*;
-use nav_dock_api::{Section, placeholder_page};
-
-const ICON: &[u8] = include_bytes!("../assets/magnifying-glass-fill.svg");
+use screen::{Screen, placeholder_page};
 
 pub struct Search;
 
-impl Section for Search {
-    fn id(&self) -> &'static str {
-        "search"
-    }
-
-    fn label(&self) -> &'static str {
-        "Search"
-    }
-
-    fn icon_svg(&self) -> &'static [u8] {
-        ICON
-    }
-
-    fn spawn_page(&self, app: &mut App, parent: NodeId) -> NodeId {
-        placeholder_page(app, parent, self.label())
+impl Screen for Search {
+    fn build(&self, app: &mut App, parent: NodeId) -> NodeId {
+        placeholder_page(app, parent, "Universal Search")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mecha_wayland::mechanix_widgets::prelude::{FontBook, Text};
+    use status_bar::GEIST_MONO_BYTES;
 
     #[test]
-    fn icon_rasterises() {
-        assert!(Bitmap::from_svg(Search.icon_svg(), 24).is_ok());
-        assert_eq!(Search.id(), "search");
-        assert_eq!(Search.label(), "Search");
+    fn builds_one_label() {
+        let mut app = App::new();
+        app.add_module(LayoutModule)
+            .add_module(PaintModule)
+            .add_module(MechanixTheme::dark())
+            .insert_resource(Atlas::new());
+        let font = app
+            .resource_mut::<Atlas>()
+            .add_font(GEIST_MONO_BYTES)
+            .expect("GeistMono loads");
+        app.insert_resource(FontBook::new(font));
+
+        let root = app.root();
+        let page = Search.build(&mut app, root);
+        app.tick();
+
+        let texts: Vec<_> = app
+            .descendants(page)
+            .filter(|n| app.widget::<Text>(*n).is_some())
+            .collect();
+        assert_eq!(texts.len(), 1);
     }
 }

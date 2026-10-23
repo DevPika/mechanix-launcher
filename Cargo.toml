@@ -6,11 +6,11 @@ edition = "2024"
 [dependencies]
 mecha-wayland.workspace = true
 status-bar.workspace = true
+screen.workspace = true
 home.workspace = true
-nav-dock.workspace = true
-favourites.workspace = true
+app-drawer.workspace = true
 search.workspace = true
-recents.workspace = true
+running-apps.workspace = true
 notifications.workspace = true
 quick-settings.workspace = true
 
@@ -20,11 +20,10 @@ members = [
     "crates/status-bar",
     "crates/home",
     "crates/gestures",
-    "crates/nav-dock-api",
-    "crates/nav-dock",
-    "crates/favourites",
+    "crates/screen",
+    "crates/app-drawer",
     "crates/search",
-    "crates/recents",
+    "crates/running-apps",
     "crates/notifications",
     "crates/quick-settings",
 ]
@@ -35,11 +34,10 @@ mecha-wayland = { git = "https://github.com/mecha-org/mecha-wayland", branch = "
 status-bar = { path = "crates/status-bar" }
 home = { path = "crates/home" }
 gestures = { path = "crates/gestures" }
-nav-dock-api = { path = "crates/nav-dock-api" }
-nav-dock = { path = "crates/nav-dock" }
-favourites = { path = "crates/favourites" }
+screen = { path = "crates/screen" }
+app-drawer = { path = "crates/app-drawer" }
 search = { path = "crates/search" }
-recents = { path = "crates/recents" }
+running-apps = { path = "crates/running-apps" }
 notifications = { path = "crates/notifications" }
 quick-settings = { path = "crates/quick-settings" }
 

@@ -7,7 +7,7 @@ pub use services::{BluetoothModule, BluetoothStatus, UpowerModule, WifiModule, W
 use mecha_wayland::prelude::*;
 
 pub use indicators::*;
-pub use module::StatusBarModule;
+pub use module::{StatusBarModule, StatusBarScreen};
 pub use status_bar::{StatusBar, StatusBarBuilder, StatusUpdate, status_bar};
 
 /// Bundled GeistMono font for status bar numeric text (such as battery percentage).

@@ -33,6 +33,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "app-drawer"
+version = "0.1.0"
+dependencies = [
+ "mecha-wayland",
+ "screen",
+ "status-bar",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -149,14 +158,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1a05365e3b1c6d1650318537c7460c6923f1abdd272ad6842baa2b509957a06"
 dependencies = [
  "num-traits",
-]
-
-[[package]]
-name = "favourites"
-version = "0.1.0"
-dependencies = [
- "mecha-wayland",
- "nav-dock-api",
 ]
 
 [[package]]
@@ -300,7 +301,7 @@ name = "home"
 version = "0.1.0"
 dependencies = [
  "mecha-wayland",
- "nav-dock-api",
+ "screen",
  "status-bar",
 ]
 
@@ -368,13 +369,13 @@ dependencies = [
 name = "launcher"
 version = "0.1.0"
 dependencies = [
- "favourites",
+ "app-drawer",
  "home",
  "mecha-wayland",
- "nav-dock",
  "notifications",
  "quick-settings",
- "recents",
+ "running-apps",
+ "screen",
  "search",
  "status-bar",
 ]
@@ -490,29 +491,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "nav-dock"
-version = "0.1.0"
-dependencies = [
- "gestures",
- "mecha-wayland",
- "nav-dock-api",
- "status-bar",
-]
-
-[[package]]
-name = "nav-dock-api"
-version = "0.1.0"
-dependencies = [
- "mecha-wayland",
- "status-bar",
-]
-
-[[package]]
 name = "notifications"
 version = "0.1.0"
 dependencies = [
  "mecha-wayland",
- "nav-dock-api",
+ "screen",
+ "status-bar",
 ]
 
 [[package]]
@@ -617,7 +601,8 @@ name = "quick-settings"
 version = "0.1.0"
 dependencies = [
  "mecha-wayland",
- "nav-dock-api",
+ "screen",
+ "status-bar",
 ]
 
 [[package]]
@@ -637,14 +622,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
 dependencies = [
  "proc-macro2",
-]
-
-[[package]]
-name = "recents"
-version = "0.1.0"
-dependencies = [
- "mecha-wayland",
- "nav-dock-api",
 ]
 
 [[package]]
@@ -698,17 +675,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
+name = "running-apps"
+version = "0.1.0"
+dependencies = [
+ "mecha-wayland",
+ "screen",
+ "status-bar",
+]
+
+[[package]]
 name = "rustversion"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "screen"
+version = "0.1.0"
+dependencies = [
+ "mecha-wayland",
+ "status-bar",
+]
+
+[[package]]
 name = "search"
 version = "0.1.0"
 dependencies = [
  "mecha-wayland",
- "nav-dock-api",
+ "screen",
+ "status-bar",
 ]
 
 [[package]]
@@ -788,6 +783,7 @@ name = "status-bar"
 version = "0.1.0"
 dependencies = [
  "mecha-wayland",
+ "screen",
 ]
 
 [[package]]

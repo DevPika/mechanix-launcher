@@ -1,33 +1,11 @@
 use mecha_wayland::prelude::*;
+use screen::{Screen, placeholder_page};
 
-/// Spawns the home surface: a black layer-shell window on the Bottom layer
-/// anchored to all four edges with no explicit size, so the compositor fills
-/// the output. It sits under every other surface.
-///
-/// Expects the host to have installed layout, window and (for presentation)
-/// Wayland with `ZwlrLayerShellV1` bound.
-pub struct HomeModule;
+pub struct Home;
 
-impl Module for HomeModule {
-    fn install(self, app: &mut App) {
-        let role = Role::Layer(LayerRole {
-            layer: Layer::Bottom,
-            anchor: Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
-            exclusive_zone: 0,
-            namespace: "mechanix-home".into(),
-            keyboard_interactivity: KeyboardInteractivity::None,
-        });
-
-        let root = app.root();
-        let window = app.spawn_with(
-            root,
-            window()
-                .title("mechanix-home")
-                .layout(LayoutStyle::default())
-                .clear(Color::BLACK),
-            (role,),
-        );
-        nav_dock_api::placeholder_page(app, window.id(), "Homescreen");
+impl Screen for Home {
+    fn build(&self, app: &mut App, parent: NodeId) -> NodeId {
+        placeholder_page(app, parent, "Homescreen")
     }
 }
 
@@ -38,10 +16,9 @@ mod tests {
     use status_bar::GEIST_MONO_BYTES;
 
     #[test]
-    fn home_spawns_one_window() {
+    fn builds_one_label() {
         let mut app = App::new();
         app.add_module(LayoutModule)
-            .add_module(WindowModule)
             .add_module(PaintModule)
             .add_module(MechanixTheme::dark())
             .insert_resource(Atlas::new());
@@ -50,21 +27,13 @@ mod tests {
             .add_font(GEIST_MONO_BYTES)
             .expect("GeistMono loads");
         app.insert_resource(FontBook::new(font));
-        // PresentationModule registers Role; it needs a live compositor.
-        app.register_component::<Role>();
-        app.add_module(HomeModule);
+
+        let root = app.root();
+        let page = Home.build(&mut app, root);
         app.tick();
 
-        let ids: Vec<_> = app.resource::<Windows>().iter().collect();
-        assert_eq!(ids.len(), 1);
-        let role = app.component::<Role>(ids[0]).expect("window has a Role");
-        match role {
-            Role::Layer(l) => assert_eq!(l.layer, Layer::Bottom),
-            _ => panic!("expected a layer role"),
-        }
-
         let texts: Vec<_> = app
-            .descendants(ids[0])
+            .descendants(page)
             .filter(|n| app.widget::<Text>(*n).is_some())
             .collect();
         assert_eq!(texts.len(), 1);

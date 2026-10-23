@@ -5,4 +5,7 @@ edition = "2024"
 
 [dependencies]
 mecha-wayland.workspace = true
-nav-dock-api.workspace = true
+screen.workspace = true
+
+[dev-dependencies]
+status-bar.workspace = true

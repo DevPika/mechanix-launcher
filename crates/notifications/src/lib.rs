@@ -1,36 +1,41 @@
 use mecha_wayland::prelude::*;
-use nav_dock_api::{Section, placeholder_page};
-
-const ICON: &[u8] = include_bytes!("../assets/bell-fill.svg");
+use screen::{Screen, placeholder_page};
 
 pub struct Notifications;
 
-impl Section for Notifications {
-    fn id(&self) -> &'static str {
-        "notifications"
-    }
-
-    fn label(&self) -> &'static str {
-        "Notifications"
-    }
-
-    fn icon_svg(&self) -> &'static [u8] {
-        ICON
-    }
-
-    fn spawn_page(&self, app: &mut App, parent: NodeId) -> NodeId {
-        placeholder_page(app, parent, self.label())
+impl Screen for Notifications {
+    fn build(&self, app: &mut App, parent: NodeId) -> NodeId {
+        placeholder_page(app, parent, "Notifications")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mecha_wayland::mechanix_widgets::prelude::{FontBook, Text};
+    use status_bar::GEIST_MONO_BYTES;
 
     #[test]
-    fn icon_rasterises() {
-        assert!(Bitmap::from_svg(Notifications.icon_svg(), 24).is_ok());
-        assert_eq!(Notifications.id(), "notifications");
-        assert_eq!(Notifications.label(), "Notifications");
+    fn builds_one_label() {
+        let mut app = App::new();
+        app.add_module(LayoutModule)
+            .add_module(PaintModule)
+            .add_module(MechanixTheme::dark())
+            .insert_resource(Atlas::new());
+        let font = app
+            .resource_mut::<Atlas>()
+            .add_font(GEIST_MONO_BYTES)
+            .expect("GeistMono loads");
+        app.insert_resource(FontBook::new(font));
+
+        let root = app.root();
+        let page = Notifications.build(&mut app, root);
+        app.tick();
+
+        let texts: Vec<_> = app
+            .descendants(page)
+            .filter(|n| app.widget::<Text>(*n).is_some())
+            .collect();
+        assert_eq!(texts.len(), 1);
     }
 }

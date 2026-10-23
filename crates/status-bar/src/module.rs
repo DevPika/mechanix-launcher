@@ -1,38 +1,66 @@
 use mecha_wayland::prelude::*;
+use screen::Screen;
 
-use crate::{BluetoothModule, DEFAULT_BAR_HEIGHT, UpowerModule, WifiModule, status_bar};
+use crate::{BluetoothModule, UpowerModule, WifiModule, status_bar};
 
-/// Installs the status bar's services and spawns its window: a layer-shell
-/// surface anchored to the top edge that reserves [`DEFAULT_BAR_HEIGHT`].
+/// Installs the status bar's services (Wi-Fi, Bluetooth and UPower). It spawns
+/// no window; place the bar with [`StatusBarScreen`].
 ///
-/// Expects the host to have installed layout, paint, window, render, the
-/// theme, D-Bus, Wayland (with `ZwlrLayerShellV1` bound) and presentation,
-/// and to have inserted the [`Atlas`], `FontBook` and [`StatusIcons`](crate::StatusIcons).
+/// Expects the host to have installed D-Bus and to have inserted the
+/// [`Atlas`], `FontBook` and [`StatusIcons`](crate::StatusIcons).
 pub struct StatusBarModule;
 
 impl Module for StatusBarModule {
     fn install(self, app: &mut App) {
-        app.add_module(WifiModule).add_module(BluetoothModule);
+        app.add_module(WifiModule)
+            .add_module(BluetoothModule)
+            .add_module(UpowerModule);
+    }
+}
 
-        let role = Role::Layer(LayerRole {
-            layer: Layer::Top,
-            anchor: Anchor::TOP | Anchor::LEFT | Anchor::RIGHT,
-            exclusive_zone: DEFAULT_BAR_HEIGHT as i32,
-            namespace: "mechanix-status-bar".into(),
-            keyboard_interactivity: KeyboardInteractivity::None,
-        });
+/// The status bar as content: builds a [`StatusBar`](crate::StatusBar) under
+/// any parent node.
+pub struct StatusBarScreen;
+
+impl Screen for StatusBarScreen {
+    fn build(&self, app: &mut App, parent: NodeId) -> NodeId {
+        app.spawn(parent, status_bar()).id()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{DEFAULT_ICON_SIZE, GEIST_MONO_BYTES, StatusBar, StatusIcons};
+    use mecha_wayland::mechanix_widgets::prelude::FontBook;
+
+    #[test]
+    fn status_bar_screen_builds_status_bar() {
+        let mut app = App::new();
+        app.add_module(LayoutModule)
+            .add_module(WindowModule)
+            .add_module(PaintModule)
+            .add_module(MechanixTheme::dark())
+            .insert_resource(Atlas::new());
+        let font = app
+            .resource_mut::<Atlas>()
+            .add_font(GEIST_MONO_BYTES)
+            .expect("GeistMono loads");
+        app.insert_resource(FontBook::new(font));
+        let icons = StatusIcons::load(&mut app.resource_mut::<Atlas>(), DEFAULT_ICON_SIZE)
+            .expect("icons load");
+        app.insert_resource(icons);
 
         let root = app.root();
-        let win = app.spawn_with(
-            root,
-            window()
-                .title("mechanix-status-bar")
-                .layout(LayoutStyle::default().height(px(DEFAULT_BAR_HEIGHT))),
-            (role,),
-        );
-        app.spawn(win, status_bar());
+        let bar = StatusBarScreen.build(&mut app, root);
+        app.tick();
 
-        // The initial UPower reply emits directly to the existing status bar.
-        app.add_module(UpowerModule);
+        assert!(app.widget::<StatusBar>(bar).is_some());
+        let bars = app
+            .descendants(root)
+            .filter(|n| app.widget::<StatusBar>(*n).is_some())
+            .count();
+        assert_eq!(bars, 1);
+        assert_eq!(app.resource::<Windows>().iter().count(), 0);
     }
 }

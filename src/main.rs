@@ -1,12 +1,5 @@
 use mecha_wayland::mechanix_widgets::prelude::FontBook;
 use mecha_wayland::prelude::*;
-use favourites::Favourites;
-use home::HomeModule;
-use nav_dock::{NavDockConfig, NavDockModule};
-use notifications::Notifications;
-use quick_settings::QuickSettings;
-use recents::Recents;
-use search::Search;
 use status_bar::{DEFAULT_ICON_SIZE, GEIST_MONO_BYTES, StatusBarModule, StatusIcons};
 
 fn main() {
@@ -46,16 +39,7 @@ fn main() {
             budget: Budget::default(),
         });
 
-    app.add_module(HomeModule).add_module(StatusBarModule);
-
-    app.add_module(
-        NavDockModule::new(NavDockConfig::default())
-            .section(Favourites)
-            .section(Search)
-            .section(Recents)
-            .section(Notifications)
-            .section(QuickSettings),
-    );
+    app.add_module(StatusBarModule);
 
     app.run();
 }

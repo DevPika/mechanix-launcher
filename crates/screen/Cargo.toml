@@ -1,8 +1,10 @@
 [package]
-name = "favourites"
+name = "screen"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 mecha-wayland.workspace = true
-nav-dock-api.workspace = true
+
+[dev-dependencies]
+status-bar.workspace = true

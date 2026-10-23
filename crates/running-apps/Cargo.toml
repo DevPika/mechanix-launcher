@@ -1,12 +1,11 @@
 [package]
-name = "nav-dock"
+name = "running-apps"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 mecha-wayland.workspace = true
-nav-dock-api.workspace = true
-gestures.workspace = true
+screen.workspace = true
 
 [dev-dependencies]
 status-bar.workspace = true
