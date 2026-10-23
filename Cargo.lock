@@ -497,6 +497,7 @@ dependencies = [
  "gestures",
  "mecha-wayland",
  "screen",
+ "status-bar",
 ]
 
 [[package]]
