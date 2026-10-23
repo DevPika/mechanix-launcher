@@ -33,7 +33,7 @@ impl Widget for Shell {
     type Builder = ShellBuilder;
 
     fn build(b: Self::Builder, _me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-		  /*
+        /*
         let role = Role::Layer(LayerRole {
             layer: Layer::Overlay,
             anchor: Anchor::TOP | Anchor::LEFT | Anchor::RIGHT,
@@ -41,7 +41,7 @@ impl Widget for Shell {
             namespace: "mechanix-quicksettings".into(),
             keyboard_interactivity: KeyboardInteractivity::None,
         });
-		  */
+          */
 
         let win = s.spawn_with(
             b.root,
