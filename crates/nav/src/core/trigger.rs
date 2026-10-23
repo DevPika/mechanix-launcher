@@ -1,8 +1,8 @@
 use gestures::Axis;
 
+use super::AreaId;
 use super::config::NavConfig;
 use super::gesture::{Detect, Gesture, Phase};
-use super::AreaId;
 
 /// Events from outside the touch stream. None exist yet.
 #[non_exhaustive]
@@ -78,7 +78,12 @@ pub struct Swipe {
 }
 
 pub const fn swipe(area: AreaId, dir: Direction, timing: Timing) -> Swipe {
-    Swipe { area, dir, timing, span: Span::Whole }
+    Swipe {
+        area,
+        dir,
+        timing,
+        span: Span::Whole,
+    }
 }
 
 impl Swipe {
@@ -113,8 +118,8 @@ impl Trigger for Swipe {
         match phase {
             Phase::Moving => Detect::Progress((travel / needed).clamp(0.0, 1.0)),
             Phase::Released => {
-                let held = g.elapsed >= cfg.hold_time
-                    && self.dir.along(g.velocity) < cfg.flick_px_per_ms;
+                let held =
+                    g.elapsed >= cfg.hold_time && self.dir.along(g.velocity) < cfg.flick_px_per_ms;
                 let timing_ok = match self.timing {
                     Timing::Any => true,
                     Timing::Held => held,
@@ -130,7 +135,10 @@ impl Trigger for Swipe {
     }
 
     fn mirrored(&self) -> Option<Box<dyn Trigger>> {
-        Some(Box::new(Swipe { dir: self.dir.opposite(), ..*self }))
+        Some(Box::new(Swipe {
+            dir: self.dir.opposite(),
+            ..*self
+        }))
     }
 }
 
@@ -163,9 +171,15 @@ mod tests {
 
     fn up(dy: f32, ms: u64, vy: f32) -> Gesture {
         gesture(
-            Size { width: 600.0, height: 20.0 },
+            Size {
+                width: 600.0,
+                height: 20.0,
+            },
             Point { x: 300.0, y: 10.0 },
-            Point { x: 300.0, y: 10.0 + dy },
+            Point {
+                x: 300.0,
+                y: 10.0 + dy,
+            },
             ms,
             (0.0, vy),
         )
@@ -173,7 +187,10 @@ mod tests {
 
     fn down(dy: f32) -> Gesture {
         gesture(
-            Size { width: 600.0, height: 20.0 },
+            Size {
+                width: 600.0,
+                height: 20.0,
+            },
             Point { x: 300.0, y: 0.0 },
             Point { x: 300.0, y: dy },
             100,
@@ -232,15 +249,24 @@ mod tests {
     #[test]
     fn span_filters_by_start_x() {
         let g = gesture(
-            Size { width: 600.0, height: 20.0 },
+            Size {
+                width: 600.0,
+                height: 20.0,
+            },
             Point { x: 100.0, y: 0.0 },
             Point { x: 100.0, y: 100.0 },
             100,
             (0.0, 0.0),
         );
         let base = swipe(TOP_EDGE, Direction::Down, Timing::Any);
-        assert_eq!(run(base.span(Span::RightHalf), &g, Phase::Released), Detect::Ignore);
-        assert_eq!(run(base.span(Span::LeftHalf), &g, Phase::Released), Detect::Commit);
+        assert_eq!(
+            run(base.span(Span::RightHalf), &g, Phase::Released),
+            Detect::Ignore
+        );
+        assert_eq!(
+            run(base.span(Span::LeftHalf), &g, Phase::Released),
+            Detect::Commit
+        );
     }
 
     #[test]
@@ -257,7 +283,10 @@ mod tests {
         assert_eq!(m.area(), TOP_EDGE);
         // An Up swipe of the mirrored trigger commits where the original cancels.
         let g = gesture(
-            Size { width: 600.0, height: 20.0 },
+            Size {
+                width: 600.0,
+                height: 20.0,
+            },
             Point { x: 100.0, y: 100.0 },
             Point { x: 100.0, y: 0.0 },
             100,
@@ -266,7 +295,12 @@ mod tests {
         let cfg = NavConfig::default();
         assert_eq!(m.detect(&g, Phase::Released, &cfg), Detect::Commit);
         assert_eq!(t.detect(&g, Phase::Released, &cfg), Detect::Cancel);
-        let mm = Swipe { dir: Direction::Up, ..t }.mirrored().unwrap();
+        let mm = Swipe {
+            dir: Direction::Up,
+            ..t
+        }
+        .mirrored()
+        .unwrap();
         assert_eq!(mm.detect(&g, Phase::Released, &cfg), Detect::Cancel);
     }
 }

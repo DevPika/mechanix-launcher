@@ -63,7 +63,9 @@ impl Motion for Fade {
     }
 
     fn visual(&self, presence: f32) -> Visual {
-        Visual { cover: 1.0 - presence }
+        Visual {
+            cover: 1.0 - presence,
+        }
     }
 }
 
@@ -75,7 +77,10 @@ mod tests {
 
     #[test]
     fn instant_settles_immediately() {
-        assert_eq!(INSTANT.settle(0.3, Final::Open, MS(0), &NavConfig::default()), 1.0);
+        assert_eq!(
+            INSTANT.settle(0.3, Final::Open, MS(0), &NavConfig::default()),
+            1.0
+        );
     }
 
     #[test]
@@ -89,7 +94,13 @@ mod tests {
     #[test]
     fn fade_clamps_large_dt() {
         let cfg = NavConfig::default();
-        assert_eq!(FADE.settle(0.9, Final::Open, Duration::from_secs(10), &cfg), 1.0);
-        assert_eq!(FADE.settle(0.1, Final::Closed, Duration::from_secs(10), &cfg), 0.0);
+        assert_eq!(
+            FADE.settle(0.9, Final::Open, Duration::from_secs(10), &cfg),
+            1.0
+        );
+        assert_eq!(
+            FADE.settle(0.1, Final::Closed, Duration::from_secs(10), &cfg),
+            0.0
+        );
     }
 }

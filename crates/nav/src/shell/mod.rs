@@ -2,6 +2,8 @@
 //! pushes the stack's state onto them.
 
 mod apply;
+mod input;
 mod module;
+mod tick;
 
 pub use module::{NavModule, WindowSpec, nav_window};

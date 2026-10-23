@@ -9,8 +9,7 @@ use crate::core::{AreaId, ContainerId, Stack};
 /// A nav window, in spawn order.
 pub(crate) struct NavWindow {
     pub(crate) node: NodeId,
-    /// The area its touches are tagged with; read by the touch input.
-    #[allow(dead_code)]
+    /// The area its touches are tagged with.
     pub(crate) area: AreaId,
     /// Every container in this window, children included, in z order.
     pub(crate) containers: Vec<ContainerId>,
@@ -37,6 +36,10 @@ pub(crate) struct Nav {
     pub(crate) containers: Vec<ContainerNodes>,
     /// Each nav window's last `Resized` size.
     pub(crate) sizes: HashMap<NodeId, Size>,
+    /// Contacts currently pressed on a nav window.
+    pub(crate) pressed: Vec<u32>,
+    /// When the stack was last ticked; `None` while nothing animates.
+    pub(crate) last_tick: Option<std::time::Instant>,
 }
 impl Resource for Nav {}
 

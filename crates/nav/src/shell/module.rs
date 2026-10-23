@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use mecha_wayland::prelude::*;
 
 use super::apply::{ContainerNodes, Nav, NavWindow, apply, on_resized};
+use super::input::on_contact;
+use super::tick::on_frame;
 use crate::core::{AreaId, ContainerSpec, NavConfig, Stack};
 
 /// One nav window: its touch area, layer role, layout and containers.
@@ -143,14 +145,18 @@ impl Module for NavModule {
             windows,
             containers,
             sizes: HashMap::new(),
+            pressed: Vec::new(),
+            last_tick: None,
         });
         app.system(on_resized);
+        app.system(on_contact);
+        app.system(on_frame);
         apply(app);
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::time::{Duration, Instant};
 
     use mecha_wayland::mechanix_widgets::prelude::{FontBook, Text};
@@ -164,12 +170,12 @@ mod tests {
     };
     use crate::shell::apply::{Nav, apply};
 
-    const HOME_AREA: AreaId = AreaId("home");
-    const PANEL_AREA: AreaId = AreaId("panel");
+    pub(crate) const HOME_AREA: AreaId = AreaId("home");
+    pub(crate) const PANEL_AREA: AreaId = AreaId("panel");
 
-    const HOME: ContainerId = ContainerId("home");
-    const DRAWER: ContainerId = ContainerId("drawer");
-    const NOTIFICATIONS: ContainerId = ContainerId("notifications");
+    pub(crate) const HOME: ContainerId = ContainerId("home");
+    pub(crate) const DRAWER: ContainerId = ContainerId("drawer");
+    pub(crate) const NOTIFICATIONS: ContainerId = ContainerId("notifications");
 
     struct Label(&'static str);
     impl Screen for Label {
@@ -188,7 +194,7 @@ mod tests {
         })
     }
 
-    fn module(home_open: bool) -> NavModule {
+    pub(crate) fn module(home_open: bool) -> NavModule {
         let home = container(HOME, Label("Home"))
             .open(swipe(BOTTOM_EDGE, Direction::Up, Timing::Quick), FADE)
             .child(
@@ -224,7 +230,7 @@ mod tests {
             )
     }
 
-    fn app_with(m: NavModule) -> App {
+    pub(crate) fn app_with(m: NavModule) -> App {
         let mut app = App::new();
         app.add_module(LayoutModule)
             .add_module(WindowModule)
@@ -243,7 +249,7 @@ mod tests {
         app
     }
 
-    fn node_of(app: &App, id: ContainerId) -> NodeId {
+    pub(crate) fn node_of(app: &App, id: ContainerId) -> NodeId {
         app.resource::<Nav>().container(id).node
     }
 
@@ -251,7 +257,7 @@ mod tests {
         app.resource::<Nav>().container(id).cover
     }
 
-    fn display(app: &App, node: NodeId) -> Display {
+    pub(crate) fn display(app: &App, node: NodeId) -> Display {
         app.component::<LayoutStyle>(node).unwrap().display
     }
 
