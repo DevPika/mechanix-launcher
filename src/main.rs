@@ -11,7 +11,7 @@ mod util;
 use bottom_bar::BottomBarBuilder;
 use header::HeaderBuilder;
 use quick_settings::QuickSettingsBuilder;
-use services::{BluetoothModule, UpowerModule};
+use services::{BluetoothModule, UpowerModule, NetworkManagerModule};
 use sliders::SlidersBuilder;
 
 const PANEL_HEIGHT: f32 = 620.0;
@@ -81,6 +81,7 @@ fn main() {
     app.add_module(RingModule::default())
         .add_module(DBusModule::new().system())
         .add_module(UpowerModule)
+        .add_module(NetworkManagerModule)
         .add_module(BluetoothModule)
         .add_module(
             WaylandModule::new()
