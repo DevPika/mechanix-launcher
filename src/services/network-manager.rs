@@ -79,6 +79,19 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                         false
                     }
                 };
+
+            app.resource_mut::<NMState>().wireless_hardware_enabled =
+                match properties.get_as::<bool>("WirelessHardwareEnabled") {
+                    Some(Ok(enabled)) => enabled,
+                    Some(Err(error)) => {
+                        eprintln!("NetworkManager: invalid WirelessHardwareEnabled: {error:?}");
+                        false
+                    }
+                    None => {
+                        eprintln!("NetworkManager: missing WirelessHardwareEnabled");
+                        false
+                    }
+                };
         }
     }
 }
