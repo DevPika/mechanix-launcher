@@ -5,6 +5,7 @@ use std::collections::HashMap;
 const NM: &str = "org.freedesktop.NetworkManager";
 const NM_MAIN_OBJ: &str = "/org/freedesktop/NetworkManager";
 const NM_DEVICE: &str = "org.freedesktop.NetworkManager.Device";
+const NM_WIRELESS: &str = "org.freedesktop.NetworkManager.Device.Wireless";
 
 // enum
 mod nm_device_type {
@@ -24,11 +25,12 @@ enum CallType {
     /// GetAll on ObjectPath of a a device
     /// Use to determine ActiveConnection and DeviceType
     DeviceProperties(ObjectPath),
+    /// Get ActiveAccessPoint of a device described by ObjectPath
+    /// This is only called once a WifiDevice is confirmed
+    ActiveAccessPoint(ObjectPath),
 }
 
 struct WifiDevice {
-    /// State from the Device interface; 0 means unknown, 100 means activated.
-    state: u32,
     /// Device PropertiesChanged match for tracking State.
     /// Take and unregister this match when clearing the device's subscriptions.
     properties_changed: Option<MatchId>,
@@ -116,26 +118,30 @@ impl Module for NetworkManagerModule {
 }
 
 fn on_method_reply(app: &mut App, event: &MethodReply) {
-    let mut state = app.resource_mut::<NMState>();
-    let Some(call_type) = state.pending.remove(&event.call) else {
-        return; // another module's DBus call
-    };
+    let (call_type, message) = {
+        let mut state = app.resource_mut::<NMState>();
+        let Some(call_type) = state.pending.remove(&event.call) else {
+            return; // another module's DBus call
+        };
 
-    let message = match &event.result {
-        Ok(message) => message,
-        // cleanly handle network manager not being available
-        Err(error)
-            if error.is("org.freedesktop.DBus.Error.ServiceUnknown")
-                || error.is("org.freedesktop.DBus.Error.NameHasNoOwner") =>
-        {
-            eprintln!("NetworkManager unavailable, clearing all pending calls");
-            state.pending.clear();
-            return;
-        }
-        Err(error) => {
-            eprintln!("NetworkManager request failed: {error:?}");
-            return;
-        }
+        let message = match &event.result {
+            Ok(message) => message,
+            // cleanly handle network manager not being available
+            Err(error)
+                if error.is("org.freedesktop.DBus.Error.ServiceUnknown")
+                    || error.is("org.freedesktop.DBus.Error.NameHasNoOwner") =>
+            {
+                eprintln!("NetworkManager unavailable, clearing all pending calls");
+                state.pending.clear();
+                return;
+            }
+            Err(error) => {
+                eprintln!("NetworkManager request failed: {error:?}");
+                return;
+            }
+        };
+
+        (call_type, message)
     };
 
     // handle messages
@@ -148,6 +154,7 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                     return;
                 }
             };
+            let mut state = app.resource_mut::<NMState>();
 
             // read necessary state
             state.networking_enabled = unwrap_property(&properties, "NetworkingEnabled");
@@ -184,21 +191,26 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 return;
             }
 
-            /*
-            This guard exists because we might receive a DeviceAdded before the
-            initial Manager's GetAll.
+            let device_state: u32 = unwrap_property(&properties, "State");
+            if device_state == nm_device_state::ACTIVE {
+                let call = app
+                    .resource_mut::<DBus>()
+                    .system()
+                    .object(NM, path.clone())
+                    .get_property(NM_WIRELESS, "ActiveAccessPoint");
+                app.resource_mut::<NMState>()
+                    .pending
+                    .insert(call, CallType::ActiveAccessPoint(path.clone()));
+            };
 
-            When that happens, we basically don't need to do extra work here by
-            re-requesting ActiveConnection and this also allows DeviceAdded to
-            blindly push without checking first.
-            */
-            state.wifi_devices.entry(path).or_insert(WifiDevice {
-                state: nm_device_state::UNKNOWN,
+            let mut state = app.resource_mut::<NMState>();
+            state.wifi_devices.insert(path, WifiDevice {
                 properties_changed: None,
                 wireless_properties_changed: None,
                 active_ap: None,
             });
         }
+        _ => {}
     }
 }
 
