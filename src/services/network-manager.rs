@@ -30,12 +30,21 @@ enum CallType {
     ActiveAccessPoint(ObjectPath),
 }
 
+enum Subscription {
+    /// Device.StateChanged; contains the owning device's object path.
+    DeviceState(ObjectPath),
+    /// Device.Wireless.PropertiesChanged; contains the owning device's object path.
+    WirelessProperties(ObjectPath),
+    /// AccessPoint.PropertiesChanged; contains the owning device's object path.
+    AccessPointProperties(ObjectPath),
+}
+
 struct WifiDevice {
-    /// Device PropertiesChanged match for tracking State.
-    /// Take and unregister this match when clearing the device's subscriptions.
-    properties_changed: Option<MatchId>,
-    /// Device.Wireless PropertiesChanged match for tracking ActiveAccessPoint.
-    /// Take and unregister this match when clearing the device's subscriptions.
+    /// Device.StateChanged subscription.
+    /// Duplicates the key in NMState.subscriptions for removal and unsubscription.
+    state_changed: Option<MatchId>,
+    /// Device.Wireless.PropertiesChanged subscription.
+    /// Duplicates the key in NMState.subscriptions for removal and unsubscription.
     wireless_properties_changed: Option<MatchId>,
     /// Tracked access point while the device is activated.
     /// Unregister its subscription before clearing or replacing it.
@@ -50,7 +59,7 @@ struct ActiveAccessPoint {
     /// Signal strength as a percentage from 0 to 100.
     strength: u8,
     /// AccessPoint PropertiesChanged match for tracking SSID and strength.
-    /// Take and unregister this match when clearing the access point's subscription.
+    /// Duplicates the key in NMState.subscriptions for removal and unsubscription.
     properties_changed: Option<MatchId>,
 }
 
@@ -65,6 +74,8 @@ pub struct NMState {
     pub wireless_enabled: bool,
     /// Discovered Wi-Fi devices keyed by their object paths.
     wifi_devices: HashMap<ObjectPath, WifiDevice>,
+    /// Routes device and access point subscriptions to their owning Wi-Fi devices.
+    subscriptions: HashMap<MatchId, Subscription>,
     /// Match for main-object PropertiesChanged on the NetworkManager interface.
     /// Take and unregister this match when clearing subscriptions for rediscovery.
     properties_changed: Option<MatchId>,
@@ -108,6 +119,7 @@ impl Module for NetworkManagerModule {
             wireless_hardware_enabled: false,
             wireless_enabled: false,
             wifi_devices: HashMap::new(),
+            subscriptions: HashMap::new(),
             properties_changed: Some(properties_changed),
             device_added: Some(device_added),
             device_removed: Some(device_removed),
@@ -203,12 +215,14 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                     .insert(call, CallType::ActiveAccessPoint(path.clone()));
             };
 
-            let mut state = app.resource_mut::<NMState>();
-            state.wifi_devices.insert(path, WifiDevice {
-                properties_changed: None,
-                wireless_properties_changed: None,
-                active_ap: None,
-            });
+            app.resource_mut::<NMState>().wifi_devices.insert(
+                path,
+                WifiDevice {
+                    state_changed: None,
+                    wireless_properties_changed: None,
+                    active_ap: None,
+                },
+            );
         }
         _ => {}
     }
