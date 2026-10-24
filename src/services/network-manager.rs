@@ -204,25 +204,21 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
             };
 
             let device_type: u32 = unwrap_property(&properties, "DeviceType");
-            if device_type != nm_device_type::WIFI {
+            // return if the device is a wifi device or if this device already
+            // exists in the hash map.
+            // the device can exist in the hash map if DeviceAdded's signal ran
+            // before this GetAll on this device.
+            if device_type != nm_device_type::WIFI
+                || app
+                    .resource_mut::<NMState>()
+                    .wifi_devices
+                    .contains_key(&path)
+            {
                 return;
             }
 
-            let device_state: u32 = unwrap_property(&properties, "State");
-            if device_state == nm_device_state::ACTIVE {
-                let call = app
-                    .resource_mut::<DBus>()
-                    .system()
-                    .object(NM, path.clone())
-                    .get_property(NM_WIRELESS, "ActiveAccessPoint");
-
-                app.resource_mut::<NMState>()
-                    .pending
-                    .insert(call, CallType::ActiveAccessPoint(path.clone()));
-            };
-
-            // subscribe to state change for tracking and wireless GetAll for
-            // AccessPoint changes
+            // subscribe to state change for tracking and NM_WIRELESS
+            // PropertiesChanged for AccessPoint changes
             let mut dbus = app.resource_mut::<DBus>();
             let mut dbus = dbus.system();
             let state_changed = dbus.add_match(
@@ -243,15 +239,28 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 Subscription::WirelessProperties(path.clone()),
             );
             state.wifi_devices.insert(
-                path,
+                path.clone(),
                 WifiDevice {
                     state_changed: Some(state_changed),
                     wireless_properties_changed: Some(wireless_properties_changed),
                     active_ap: None,
                 },
             );
+
+            // if we're currently connected, get access point information
+            let device_state: u32 = unwrap_property(&properties, "State");
+            if device_state == nm_device_state::ACTIVE {
+                let call = app
+                    .resource_mut::<DBus>()
+                    .system()
+                    .object(NM, path.clone())
+                    .get_property(NM_WIRELESS, "ActiveAccessPoint");
+                app.resource_mut::<NMState>()
+                    .pending
+                    .insert(call, CallType::ActiveAccessPoint(path));
+            };
         }
-        _ => {}
+        CallType::ActiveAccessPoint(path) => {}
     }
 }
 
