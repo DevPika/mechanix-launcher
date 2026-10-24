@@ -17,7 +17,12 @@ mod nm_device_type {
 mod nm_device_state {
     type EType = u32;
     pub(super) const UNKNOWN: EType = 0;
+    /// has a local or global network connection
     pub(super) const ACTIVE: EType = 100;
+    /// in the process of disconnecting from a network connection
+    pub(super) const DEACTIVATING: EType = 110;
+    /// disconnected and can connect to another network
+    pub(super) const DISCONNECTED: EType = 30;
 }
 
 enum CallType {
@@ -210,16 +215,38 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                     .system()
                     .object(NM, path.clone())
                     .get_property(NM_WIRELESS, "ActiveAccessPoint");
+
                 app.resource_mut::<NMState>()
                     .pending
                     .insert(call, CallType::ActiveAccessPoint(path.clone()));
             };
 
-            app.resource_mut::<NMState>().wifi_devices.insert(
+            // subscribe to state change for tracking and wireless GetAll for
+            // AccessPoint changes
+            let mut dbus = app.resource_mut::<DBus>();
+            let mut dbus = dbus.system();
+            let state_changed = dbus.add_match(
+                MatchRule::signal()
+                    .sender(NM)
+                    .path(path.clone())
+                    .interface(NM_DEVICE)
+                    .member("StateChanged"),
+            );
+            let wireless_properties_changed = dbus.watch_properties(NM, path.clone(), NM_WIRELESS);
+
+            let mut state = app.resource_mut::<NMState>();
+            state
+                .subscriptions
+                .insert(state_changed, Subscription::DeviceState(path.clone()));
+            state.subscriptions.insert(
+                wireless_properties_changed,
+                Subscription::WirelessProperties(path.clone()),
+            );
+            state.wifi_devices.insert(
                 path,
                 WifiDevice {
-                    state_changed: None,
-                    wireless_properties_changed: None,
+                    state_changed: Some(state_changed),
+                    wireless_properties_changed: Some(wireless_properties_changed),
                     active_ap: None,
                 },
             );
