@@ -374,7 +374,35 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                     .unwrap()
                     .active_ap = active_ap;
             }
-            Subscription::AccessPointProperties(_path) => {}
+            Subscription::AccessPointProperties(path) => {
+                let (_, properties, invalidated) = match PropertiesChanged::parse(&event.msg) {
+                    Ok(body) => body,
+                    Err(error) => {
+                        eprintln!("NetworkManager: invalid AccessPoint PropertiesChanged: {error:?}");
+                        return;
+                    }
+                };
+                let path = path.clone();
+                let Some(ap) = state
+                    .wifi_devices
+                    .get_mut(&path)
+                    .and_then(|device| device.active_ap.as_mut())
+                else {
+                    continue;
+                };
+
+                // Invalidation takes precedence; missing or malformed values preserve the cache.
+                if invalidated.iter().any(|name| name == "Ssid") {
+                    ap.ssid.clear();
+                } else if let Some(ssid) = changed_property::<Vec<u8>>(&properties, "Ssid") {
+                    ap.ssid = ssid;
+                }
+                if invalidated.iter().any(|name| name == "Strength") {
+                    ap.strength = 0;
+                } else if let Some(strength) = changed_property::<u8>(&properties, "Strength") {
+                    ap.strength = strength;
+                }
+            }
         }
     }
 }
