@@ -262,7 +262,7 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
         }
         CallType::ActiveAccessPoint(path) => {
             // Properties.Get returns a variant containing the object path.
-            let _access_point_path = match message
+            let access_point_path = match message
                 .body::<(Value,)>()
                 .and_then(|(value,)| value.get::<ObjectPath>())
             {
@@ -274,6 +274,13 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                     return;
                 }
             };
+            /*
+            An LLM has told me that the access point path can just be "/", even
+            if the state is ACTIVE, so check for that here
+            */
+            if access_point_path.as_str() == "/" {
+                return;
+            }
         }
     }
 }
