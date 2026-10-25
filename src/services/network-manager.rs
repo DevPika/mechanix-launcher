@@ -137,6 +137,37 @@ impl Module for NetworkManagerModule {
             pending: HashMap::from([(call, CallType::GetAll)]),
         });
         app.system(on_method_reply);
+        app.system(on_signal_received);
+    }
+}
+
+fn on_signal_received(app: &mut App, event: &SignalReceived) {
+    // thanks LLM, very important guard
+    if event.bus != BusId::System {
+        return;
+    }
+
+    let state = app.resource::<NMState>();
+    for match_id in &event.matches {
+        if state.device_added == Some(*match_id) {
+            continue;
+        }
+        if state.device_removed == Some(*match_id) {
+            continue;
+        }
+        if state.properties_changed == Some(*match_id) {
+            continue;
+        }
+
+        let Some(subscription) = state.subscriptions.get(match_id) else {
+            continue;
+        };
+
+        match subscription {
+            Subscription::DeviceState(_path) => {}
+            Subscription::WirelessProperties(_path) => {}
+            Subscription::AccessPointProperties(_path) => {}
+        }
     }
 }
 
