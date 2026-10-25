@@ -38,13 +38,7 @@ impl Widget for BottomBar {
                 name: "Office 01".into(),
             },
         );
-        s.spawn(
-            top,
-            BluetoothBuilder {
-                font: b.font,
-                name: "Comet".into(),
-            },
-        );
+        s.spawn(top, BluetoothBuilder { font: b.font });
         s.spawn(top, DisplayTileBuilder);
         s.spawn(top, TerminalBuilder);
         s.spawn(top, MicrophoneBuilder);
@@ -112,7 +106,8 @@ mod tests {
 
         for (state, label, is_on) in [
             (BluetoothState::On, "On", true),
-            (BluetoothState::Connected, "Comet", true),
+            (BluetoothState::Connected(1), "Connected", true),
+            (BluetoothState::Connected(2), "2 devices", true),
             (BluetoothState::Off, "Off", false),
         ] {
             app.emit(

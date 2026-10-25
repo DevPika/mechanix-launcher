@@ -44,7 +44,7 @@ fn snapshot_and_property_signals() {
     assert!(observed.apply_change(
         decode_change(&property(device.clone(), DEVICE, "Connected", true)).unwrap()
     ));
-    assert_eq!(observed.state(), BluetoothState::Connected);
+    assert_eq!(observed.state(), BluetoothState::Connected(1));
     assert_eq!(observed.connected_devices.len(), 1);
     assert!(
         observed
@@ -84,7 +84,7 @@ fn added_devices_keep_connected_until_last_one_is_removed() {
     let mut observed = BluetoothObservation::default();
     observed.adapters.insert(adapter, true);
 
-    for path in [&first, &second] {
+    for (i, path) in [&first, &second].into_iter().enumerate() {
         let added = Message::signal("/", OBJECT_MANAGER, "InterfacesAdded").with_body(&(
             path.clone(),
             HashMap::from([(
@@ -93,10 +93,10 @@ fn added_devices_keep_connected_until_last_one_is_removed() {
             )]),
         ));
         assert!(observed.apply_change(decode_change(&added).unwrap()));
-        assert_eq!(observed.state(), BluetoothState::Connected);
+        assert_eq!(observed.state(), BluetoothState::Connected(i + 1));
     }
     for (path, expected) in [
-        (first, BluetoothState::Connected),
+        (first, BluetoothState::Connected(1)),
         (second, BluetoothState::On),
     ] {
         let removed = Message::signal("/", OBJECT_MANAGER, "InterfacesRemoved")

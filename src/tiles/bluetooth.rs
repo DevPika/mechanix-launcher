@@ -19,12 +19,10 @@ pub struct Bluetooth {
     pub icon_on: SpriteId,
     pub icon_off: SpriteId,
     pub icon_connected: SpriteId,
-    pub label: String,
 }
 
 pub struct BluetoothBuilder {
     pub font: FontId,
-    pub name: String,
 }
 
 impl Build for BluetoothBuilder {
@@ -66,7 +64,6 @@ impl Widget for Bluetooth {
             icon_on,
             icon_off,
             icon_connected,
-            label: b.name,
         }
     }
 }
@@ -77,9 +74,9 @@ pub trait BluetoothContext {
 
 impl BluetoothContext for Context<'_, Bluetooth> {
     fn set_state(&mut self, state: BluetoothState) {
-        let (icon_on, icon_off, icon_connected, default_name) = {
+        let (icon_on, icon_off, icon_connected) = {
             let me = self.me();
-            (me.icon_on, me.icon_off, me.icon_connected, me.label.clone())
+            (me.icon_on, me.icon_off, me.icon_connected)
         };
         let is_on = state != BluetoothState::Off;
         let bg_color = if is_on {
@@ -100,12 +97,12 @@ impl BluetoothContext for Context<'_, Bluetooth> {
 
         let (sprite, text) = match state {
             BluetoothState::Off => (icon_off, "Off".to_string()),
-            BluetoothState::Connected => (
+            BluetoothState::Connected(count) => (
                 icon_connected,
-                if default_name.is_empty() {
+                if count <= 1 {
                     "Connected".to_string()
                 } else {
-                    default_name
+                    format!("{count} devices")
                 },
             ),
             BluetoothState::On | BluetoothState::Disconnected => (icon_on, "On".to_string()),

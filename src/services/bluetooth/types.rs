@@ -6,15 +6,17 @@ use super::interface::{ADAPTER, DEVICE};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BluetoothState {
-    Connected,
+    Connected(usize),
     #[default]
     On,
     Off,
+    #[allow(dead_code)]
     Disconnected,
 }
 
 impl BluetoothState {
     #[inline]
+    #[allow(dead_code)]
     pub fn is_visible(&self) -> bool {
         !matches!(self, Self::Off)
     }
@@ -110,10 +112,13 @@ impl BluetoothObservation {
     pub(super) fn state(&self) -> BluetoothState {
         if !self.adapters.values().any(|&powered| powered) {
             BluetoothState::Off
-        } else if !self.connected_devices.is_empty() {
-            BluetoothState::Connected
         } else {
-            BluetoothState::On
+            let count = self.connected_devices.len();
+            if count > 0 {
+                BluetoothState::Connected(count)
+            } else {
+                BluetoothState::On
+            }
         }
     }
 }

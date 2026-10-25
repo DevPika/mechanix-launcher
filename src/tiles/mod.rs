@@ -39,6 +39,8 @@ pub(super) fn build_tile<W: Widget>(
         .flex_basis(px(0.0))
         .grow(1.0)
         .shrink(0.0)
+        .min_width(px(0.0))
+        .max_width(percent(20.0))
         .column()
         .center()
         .gap(px(12.0));

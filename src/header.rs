@@ -7,7 +7,7 @@ mod svg {
 }
 
 pub const HEADER_HEIGHT: f32 = 80.0;
-const DATE: &str = "Today, 19 Oct";
+const DATE: &str = "Today,19 Oct";
 const POWER_ICON_SIZE: u32 = 26;
 
 pub struct Header;

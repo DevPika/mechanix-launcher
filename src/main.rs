@@ -11,7 +11,7 @@ mod util;
 use bottom_bar::BottomBarBuilder;
 use header::HeaderBuilder;
 use quick_settings::QuickSettingsBuilder;
-use services::{BluetoothModule, UpowerModule};
+use services::{BluetoothModule, DisplayModule, UpowerModule};
 use sliders::SlidersBuilder;
 
 const PANEL_HEIGHT: f32 = 620.0;
@@ -69,6 +69,7 @@ fn main() {
         .expect("bundled Geist Mono font should load");
     let mut app = App::new();
     app.add_module(LayoutModule)
+        .add_module(AnimationModule)
         .add_module(PaintModule)
         .add_module(WindowModule)
         .add_module(MechanixTheme::dark())
@@ -79,6 +80,7 @@ fn main() {
         .add_module(DBusModule::new().system())
         .add_module(UpowerModule)
         .add_module(BluetoothModule)
+        .add_module(DisplayModule)
         .add_module(
             WaylandModule::new()
                 .bind::<WlCompositor>()
