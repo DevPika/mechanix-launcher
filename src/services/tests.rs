@@ -142,6 +142,18 @@ fn remove_device(app: &mut App, path: &ObjectPath) {
     app.flush();
 }
 
+fn add_device(app: &mut App, path: &ObjectPath) {
+    let id = app.resource::<NMState>().device_added.unwrap();
+    app.signal(SignalReceived {
+        bus: BusId::System,
+        matches: [id].into_iter().collect(),
+        msg: Message::signal(NM_MAIN_OBJ, NM, "DeviceAdded")
+            .with_sender(NM)
+            .with_body(&(path.clone(),)),
+    });
+    app.flush();
+}
+
 fn connected_device(app: &mut App, device: &ObjectPath) {
     discover(app, std::slice::from_ref(device));
     let call = device_call(app, device);
@@ -786,4 +798,85 @@ fn device_removed_clears_pending_active_ap_read() {
     assert!(state.wifi_devices.is_empty());
     assert!(state.subscriptions.is_empty());
     assert!(state.pending.is_empty());
+}
+
+#[test]
+fn device_added_uses_discovery_before_storing_or_selecting_wifi() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    for (device_type, device_state) in [(1, 100), (2, 30), (2, 100)] {
+        let (mut app, _peer) = setup();
+        discover(&mut app, &[]);
+        add_device(&mut app, &path);
+        let state = app.resource::<NMState>();
+        assert!(state.wifi_devices.is_empty());
+        assert!(state.current_device.is_none());
+        assert!(state.subscriptions.is_empty());
+        assert_eq!(state.pending.len(), 1);
+
+        let call = device_call(&app, &path);
+        reply_properties(&mut app, call, device_properties(device_type, device_state));
+        let state = app.resource::<NMState>();
+        if device_type == 2 {
+            assert_device(&app, &path, None);
+            assert_eq!(state.current_device.as_ref(), Some(&path));
+            assert_eq!(state.wifi_devices.len(), 1);
+            assert_eq!(state.subscriptions.len(), 2);
+            assert_eq!(state.pending.len(), usize::from(device_state == 100));
+            if device_state == 100 {
+                active_ap_call(&app, &path);
+            }
+        } else {
+            assert!(state.wifi_devices.is_empty());
+            assert!(state.current_device.is_none());
+            assert!(state.subscriptions.is_empty());
+            assert!(state.pending.is_empty());
+        }
+    }
+}
+
+#[test]
+fn device_added_overlapping_initial_discovery_keeps_one_device_and_subscription_set() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    for added_reply_first in [true, false] {
+        let (mut app, _peer) = setup();
+        add_device(&mut app, &path);
+        let added_call = device_call(&app, &path);
+        let manager_call = pending_call(&app, |kind| matches!(kind, CallType::GetAll));
+        reply_properties(
+            &mut app,
+            manager_call,
+            manager_properties(std::slice::from_ref(&path)),
+        );
+        let initial_call = *app
+            .resource::<NMState>()
+            .pending
+            .keys()
+            .find(|call| **call != added_call)
+            .unwrap();
+        assert_eq!(app.resource::<NMState>().pending.len(), 2);
+        let (first, second) = if added_reply_first {
+            (added_call, initial_call)
+        } else {
+            (initial_call, added_call)
+        };
+        reply_properties(&mut app, first, device_properties(2, 100));
+        let ap_call = active_ap_call(&app, &path);
+        let state = app.resource::<NMState>();
+        let device = &state.wifi_devices[&path];
+        let matches = (device.state_changed, device.wireless_properties_changed);
+
+        reply_properties(&mut app, second, device_properties(2, 100));
+        assert_device(&app, &path, None);
+        let state = app.resource::<NMState>();
+        let device = &state.wifi_devices[&path];
+        assert_eq!(
+            matches,
+            (device.state_changed, device.wireless_properties_changed)
+        );
+        assert_eq!(state.current_device.as_ref(), Some(&path));
+        assert_eq!(state.wifi_devices.len(), 1);
+        assert_eq!(state.subscriptions.len(), 2);
+        assert_eq!(state.pending.len(), 1);
+        assert!(state.pending.contains_key(&ap_call));
+    }
 }

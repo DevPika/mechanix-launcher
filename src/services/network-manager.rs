@@ -153,6 +153,21 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
     for match_id in &event.matches {
         let mut state = app.resource_mut::<NMState>();
         if state.device_added == Some(*match_id) {
+            let (path,) = match event.msg.body::<(ObjectPath,)>() {
+                Ok(body) => body,
+                Err(error) => {
+                    eprintln!("NetworkManager: invalid DeviceAdded: {error:?}");
+                    return;
+                }
+            };
+            let call = app
+                .resource_mut::<DBus>()
+                .system()
+                .object(NM, path.clone())
+                .get_all(NM_DEVICE);
+            app.resource_mut::<NMState>()
+                .pending
+                .insert(call, CallType::DeviceProperties(path));
             continue;
         }
         if state.device_removed == Some(*match_id) {
