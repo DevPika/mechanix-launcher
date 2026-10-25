@@ -85,6 +85,8 @@ pub struct NMState {
     pub wireless_enabled: bool,
     /// Discovered Wi-Fi devices keyed by their object paths.
     wifi_devices: HashMap<ObjectPath, WifiDevice>,
+    /// Wi-Fi device selected for UI events; the first discovered device is kept.
+    current_device: Option<ObjectPath>,
     /// Routes device and access point subscriptions to their owning Wi-Fi devices.
     subscriptions: HashMap<MatchId, Subscription>,
     /// Match for main-object PropertiesChanged on the NetworkManager interface.
@@ -130,6 +132,7 @@ impl Module for NetworkManagerModule {
             wireless_hardware_enabled: false,
             wireless_enabled: false,
             wifi_devices: HashMap::new(),
+            current_device: None,
             subscriptions: HashMap::new(),
             properties_changed: Some(properties_changed),
             device_added: Some(device_added),
@@ -319,6 +322,9 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                     active_ap: None,
                 },
             );
+            if state.current_device.is_none() {
+                state.current_device = Some(path.clone());
+            }
 
             // if we're currently connected, get access point information
             let device_state: u32 = unwrap_property(&properties, "State");
