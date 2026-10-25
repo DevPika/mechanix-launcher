@@ -147,7 +147,7 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
         return;
     }
 
-    let state = app.resource::<NMState>();
+    let mut state = app.resource_mut::<NMState>();
     for match_id in &event.matches {
         if state.device_added == Some(*match_id) {
             continue;
@@ -156,6 +156,40 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
             continue;
         }
         if state.properties_changed == Some(*match_id) {
+            let (_, properties, invalidated) = match PropertiesChanged::parse(&event.msg) {
+                Ok(body) => body,
+                Err(error) => {
+                    eprintln!("NetworkManager: invalid PropertiesChanged: {error:?}");
+                    return;
+                }
+            };
+            let [
+                networking_enabled,
+                wireless_hardware_enabled,
+                wireless_enabled,
+            ] = [
+                "NetworkingEnabled",
+                "WirelessHardwareEnabled",
+                "WirelessEnabled",
+            ]
+            .map(|name| {
+                if invalidated.iter().any(|property| property == name) {
+                    Some(false) // if it's invalidated, set to false
+                } else {
+                    changed_property::<bool>(&properties, name)
+                }
+            });
+            if let Some(enabled) = networking_enabled {
+                state.networking_enabled = enabled;
+            }
+            if let Some(enabled) = wireless_hardware_enabled {
+                state.wireless_hardware_enabled = enabled;
+            }
+            if let Some(enabled) = wireless_enabled {
+                state.wireless_enabled = enabled;
+            }
+
+            // TODO: events here
             continue;
         }
 
