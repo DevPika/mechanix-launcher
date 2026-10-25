@@ -130,6 +130,18 @@ fn read_active_ap(app: &mut App, device: &ObjectPath, ap: &ObjectPath) {
     );
 }
 
+fn remove_device(app: &mut App, path: &ObjectPath) {
+    let id = app.resource::<NMState>().device_removed.unwrap();
+    app.signal(SignalReceived {
+        bus: BusId::System,
+        matches: [id].into_iter().collect(),
+        msg: Message::signal(NM_MAIN_OBJ, NM, "DeviceRemoved")
+            .with_sender(NM)
+            .with_body(&(path.clone(),)),
+    });
+    app.flush();
+}
+
 fn connected_device(app: &mut App, device: &ObjectPath) {
     discover(app, std::slice::from_ref(device));
     let call = device_call(app, device);
@@ -666,4 +678,112 @@ fn failed_or_malformed_ap_properties_keep_initial_ap_defaults() {
         assert_eq!(state.wifi_devices.len(), 1);
         assert_eq!(state.subscriptions.len(), 3);
     }
+}
+
+#[test]
+fn device_removed_cleans_subscriptions_and_only_replaces_the_removed_selection() {
+    let selected = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let other = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");
+    let remaining = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/3");
+    let other_ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/20");
+    let remaining_ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/30");
+    let (mut app, _peer) = setup();
+    discover(
+        &mut app,
+        &[selected.clone(), other.clone(), remaining.clone()],
+    );
+    for (path, state) in [(&selected, 30), (&other, 100), (&remaining, 100)] {
+        let call = device_call(&app, path);
+        reply_properties(&mut app, call, device_properties(2, state));
+    }
+    read_active_ap(&mut app, &other, &other_ap);
+    read_active_ap(&mut app, &remaining, &remaining_ap);
+    let other_call = ap_properties_call(&app, &other, &other_ap);
+    let remaining_call = ap_properties_call(&app, &remaining, &remaining_ap);
+
+    remove_device(&mut app, &other);
+    let state = app.resource::<NMState>();
+    assert_eq!(state.current_device.as_ref(), Some(&selected));
+    assert_eq!(state.wifi_devices.len(), 2);
+    assert!(!state.wifi_devices.contains_key(&other));
+    assert_eq!(state.subscriptions.len(), 5);
+    assert_eq!(state.pending.len(), 1);
+    assert!(state.pending.contains_key(&remaining_call));
+    assert_device(&app, &selected, None);
+    assert_device(&app, &remaining, Some((&remaining_ap, b"", 0)));
+
+    app.signal(MethodReply {
+        call: other_call,
+        result: Ok(
+            Message::method_return(other_call.serial).with_body(&(PropMap::from([
+                ("Ssid".into(), ssid_value(b"Removed AP")),
+                ("Strength".into(), Value::U8(100)),
+            ]),)),
+        ),
+    });
+    app.flush();
+    assert!(!app.resource::<NMState>().wifi_devices.contains_key(&other));
+    assert_device(&app, &remaining, Some((&remaining_ap, b"", 0)));
+
+    remove_device(&mut app, &selected);
+    let state = app.resource::<NMState>();
+    assert_eq!(state.current_device.as_ref(), Some(&remaining));
+    assert_eq!(state.wifi_devices.len(), 1);
+    assert_eq!(state.subscriptions.len(), 3);
+    assert_eq!(state.pending.len(), 1);
+    assert_device(&app, &remaining, Some((&remaining_ap, b"", 0)));
+
+    remove_device(&mut app, &remaining);
+    let state = app.resource::<NMState>();
+    assert!(state.current_device.is_none());
+    assert!(state.wifi_devices.is_empty());
+    assert!(state.subscriptions.is_empty());
+    assert!(state.pending.is_empty());
+    assert!(state.properties_changed.is_some());
+    assert!(state.device_added.is_some());
+    assert!(state.device_removed.is_some());
+}
+
+#[test]
+fn device_removed_during_discovery_prevents_late_reply_from_recreating_it() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let (mut app, _peer) = setup();
+    discover(&mut app, std::slice::from_ref(&path));
+    let call = device_call(&app, &path);
+    remove_device(&mut app, &path);
+    assert!(app.resource::<NMState>().pending.is_empty());
+
+    app.signal(MethodReply {
+        call,
+        result: Ok(Message::method_return(call.serial).with_body(&(device_properties(2, 100),))),
+    });
+    app.flush();
+    let state = app.resource::<NMState>();
+    assert!(state.current_device.is_none());
+    assert!(state.wifi_devices.is_empty());
+    assert!(state.subscriptions.is_empty());
+    assert!(state.pending.is_empty());
+}
+
+#[test]
+fn device_removed_clears_pending_active_ap_read() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let (mut app, _peer) = setup();
+    connected_device(&mut app, &path);
+    let call = active_ap_call(&app, &path);
+    remove_device(&mut app, &path);
+    app.signal(MethodReply {
+        call,
+        result: Ok(
+            Message::method_return(call.serial).with_body(&(Value::ObjectPath(ObjectPath::from(
+                "/org/freedesktop/NetworkManager/AccessPoint/10",
+            )),)),
+        ),
+    });
+    app.flush();
+    let state = app.resource::<NMState>();
+    assert!(state.current_device.is_none());
+    assert!(state.wifi_devices.is_empty());
+    assert!(state.subscriptions.is_empty());
+    assert!(state.pending.is_empty());
 }
