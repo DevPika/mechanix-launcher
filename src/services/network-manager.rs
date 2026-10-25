@@ -260,7 +260,21 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                     .insert(call, CallType::ActiveAccessPoint(path));
             };
         }
-        CallType::ActiveAccessPoint(path) => {}
+        CallType::ActiveAccessPoint(path) => {
+            // Properties.Get returns a variant containing the object path.
+            let _access_point_path = match message
+                .body::<(Value,)>()
+                .and_then(|(value,)| value.get::<ObjectPath>())
+            {
+                Ok(access_point_path) => access_point_path,
+                Err(error) => {
+                    eprintln!(
+                        "NetworkManager: invalid ActiveAccessPoint reply for {path:?}: {error:?}"
+                    );
+                    return;
+                }
+            };
+        }
     }
 }
 
