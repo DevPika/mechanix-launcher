@@ -11,7 +11,7 @@ const NM_ACCESS_POINT: &str = "org.freedesktop.NetworkManager.AccessPoint";
 // enum
 mod nm_device_type {
     type EType = u32;
-    const UNKNOWN: EType = 0;
+    // const UNKNOWN: EType = 0;
     pub(super) const WIFI: EType = 2;
 }
 
@@ -51,6 +51,8 @@ enum Subscription {
 }
 
 struct WifiDevice {
+    /// NetworkManager device state; compared against nm_device_state constants.
+    state: u32,
     /// Device.StateChanged subscription.
     /// Duplicates the key in NMState.subscriptions for removal and unsubscription.
     state_changed: Option<MatchId>,
@@ -267,7 +269,19 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
         };
 
         match subscription {
-            Subscription::DeviceState(_path) => {}
+            Subscription::DeviceState(path) => {
+                let (new_state, _old_state, _reason) = match event.msg.body::<(u32, u32, u32)>() {
+                    Ok(body) => body,
+                    Err(error) => {
+                        eprintln!("NetworkManager: invalid StateChanged: {error:?}");
+                        return;
+                    }
+                };
+                let path = path.clone();
+                if let Some(device) = state.wifi_devices.get_mut(&path) {
+                    device.state = new_state;
+                }
+            }
             Subscription::WirelessProperties(_path) => {}
             Subscription::AccessPointProperties(_path) => {}
         }
@@ -359,6 +373,8 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 return;
             }
 
+            let device_state: u32 = unwrap_property(&properties, "State");
+
             // subscribe to state change for tracking and NM_WIRELESS
             // PropertiesChanged for AccessPoint changes
             let mut dbus = app.resource_mut::<DBus>();
@@ -383,6 +399,7 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
             state.wifi_devices.insert(
                 path.clone(),
                 WifiDevice {
+                    state: device_state,
                     state_changed: Some(state_changed),
                     wireless_properties_changed: Some(wireless_properties_changed),
                     active_ap: None,
@@ -393,7 +410,6 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
             }
 
             // if we're currently connected, get access point information
-            let device_state: u32 = unwrap_property(&properties, "State");
             if device_state == nm_device_state::ACTIVE {
                 let call = app
                     .resource_mut::<DBus>()
