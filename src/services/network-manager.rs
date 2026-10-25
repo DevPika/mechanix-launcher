@@ -6,6 +6,7 @@ const NM: &str = "org.freedesktop.NetworkManager";
 const NM_MAIN_OBJ: &str = "/org/freedesktop/NetworkManager";
 const NM_DEVICE: &str = "org.freedesktop.NetworkManager.Device";
 const NM_WIRELESS: &str = "org.freedesktop.NetworkManager.Device.Wireless";
+const NM_ACCESS_POINT: &str = "org.freedesktop.NetworkManager.AccessPoint";
 
 // enum
 mod nm_device_type {
@@ -33,6 +34,11 @@ enum CallType {
     /// Get ActiveAccessPoint of a device described by ObjectPath
     /// This is only called once a WifiDevice is confirmed
     ActiveAccessPoint(ObjectPath),
+    /// GetAll on the access point itself to get strength and SSID
+    AccessPointProperties {
+        device_path: ObjectPath,
+        access_point_path: ObjectPath,
+    },
 }
 
 enum Subscription {
@@ -281,6 +287,77 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
             if access_point_path.as_str() == "/" {
                 return;
             }
+
+            // subscribe to PropertiesChanged to track Access Point changes
+            // This is necessary for Roaming, where the State of the device
+            // doesn't change, but the AccessPoint does.
+            let properties_changed = app.resource_mut::<DBus>().system().watch_properties(
+                NM,
+                access_point_path.clone(),
+                NM_ACCESS_POINT,
+            );
+            let mut state = app.resource_mut::<NMState>();
+            let Some(device) = state.wifi_devices.get_mut(&path) else {
+                // this else guard should never run ideally
+                // It could run if device is removed while getting this
+                // information
+                // This is just efficient book keeping, DeviceRemoved handler
+                // handles this either way
+                app.resource_mut::<DBus>()
+                    .system()
+                    .remove_match(properties_changed);
+                return;
+            };
+            device.active_ap = Some(ActiveAccessPoint {
+                path: access_point_path.clone(),
+                ssid: Vec::new(),
+                strength: 0,
+                properties_changed: Some(properties_changed),
+            });
+            state.subscriptions.insert(
+                properties_changed,
+                Subscription::AccessPointProperties(path.clone()),
+            );
+
+            let call = app
+                .resource_mut::<DBus>()
+                .system()
+                .object(NM, access_point_path.clone())
+                .get_all(NM_ACCESS_POINT);
+            app.resource_mut::<NMState>().pending.insert(
+                call,
+                CallType::AccessPointProperties {
+                    device_path: path,
+                    access_point_path,
+                },
+            );
+        }
+        CallType::AccessPointProperties {
+            // getall on access point
+            device_path,
+            access_point_path,
+        } => {
+            let (properties,) = match message.body::<(PropMap,)>() {
+                Ok(body) => body,
+                Err(error) => {
+                    eprintln!("NetworkManager: invalid access point GetAll reply: {error:?}");
+                    return;
+                }
+            };
+
+            let mut state = app.resource_mut::<NMState>();
+            let Some(device) = state.wifi_devices.get_mut(&device_path) else {
+                return;
+            };
+            let Some(access_point) = device.active_ap.as_mut() else {
+                return;
+            };
+            if access_point.path != access_point_path {
+                return; // if access point has changed during this point
+            }
+
+            access_point.ssid = unwrap_property(&properties, "Ssid");
+            access_point.strength = unwrap_property(&properties, "Strength");
         }
     }
 }
