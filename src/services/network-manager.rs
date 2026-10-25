@@ -291,6 +291,8 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                     }
                 };
 
+                // Invalidation wins over a supplied value. Both invalidation and "/"
+                // clear the AP; absent or malformed properties leave it unchanged.
                 let access_point_path =
                     if invalidated.iter().any(|name| name == "ActiveAccessPoint") {
                         None
@@ -306,13 +308,71 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                 let Some(device) = state.wifi_devices.get(path) else {
                     continue;
                 };
-                if device.active_ap.as_ref().map(|ap| &ap.path) == access_point_path.as_ref() {
+                let unchanged =
+                    device.active_ap.as_ref().map(|ap| &ap.path) == access_point_path.as_ref();
+                let path = path.clone();
+                // retain(true) keeps a request. Removing bookkeeping does not cancel
+                // D-Bus calls; on_method_reply will ignore their eventual replies.
+                state.pending.retain(|_, call| match call {
+                    // An earlier read can arrive after this signal. Discard it even
+                    // for None -> None, otherwise it could restore an obsolete AP.
+                    CallType::ActiveAccessPoint(device_path) => device_path != &path,
+                    // Keep AP-property reads for an unchanged AP or another device.
+                    CallType::AccessPointProperties { device_path, .. } => {
+                        unchanged || device_path != &path
+                    }
+                    _ => true,
+                });
+                if unchanged {
+                    // Preserve the existing AP data, match, and property read.
                     continue;
                 }
 
-                // TODO: clear the tracked AP and clean up its subscription/pending reads.
+                // Clearing and replacing share cleanup. Remove both our routing
+                // entry and the D-Bus match before subscribing to the replacement.
+                let device = state.wifi_devices.get_mut(&path).unwrap();
+                let old_match = device.active_ap.take().and_then(|ap| ap.properties_changed);
+                if let Some(id) = old_match {
+                    state.subscriptions.remove(&id);
+                    app.resource_mut::<DBus>().system().remove_match(id);
+                }
 
-                // TODO: map access_point_path into the new AP, subscribing and requesting properties.
+                // None stays None. A new path gets its own subscription and initial
+                // read, regardless of device state: the AP signal may arrive first.
+                let active_ap = access_point_path.map(|access_point_path| {
+                    let mut dbus = app.resource_mut::<DBus>();
+                    let mut bus = dbus.system();
+                    let properties_changed =
+                        bus.watch_properties(NM, access_point_path.clone(), NM_ACCESS_POINT);
+                    // Subscribe before reading so subsequent AP changes are tracked.
+                    let call = bus
+                        .object(NM, access_point_path.clone())
+                        .get_all(NM_ACCESS_POINT);
+                    let mut state = app.resource_mut::<NMState>();
+                    state.subscriptions.insert(
+                        properties_changed,
+                        Subscription::AccessPointProperties(path.clone()),
+                    );
+                    // Retain both paths so a reply applies only to this device's AP.
+                    state.pending.insert(
+                        call,
+                        CallType::AccessPointProperties {
+                            device_path: path.clone(),
+                            access_point_path: access_point_path.clone(),
+                        },
+                    );
+                    ActiveAccessPoint {
+                        path: access_point_path,
+                        ssid: Vec::new(),
+                        strength: 0,
+                        properties_changed: Some(properties_changed),
+                    }
+                });
+                app.resource_mut::<NMState>()
+                    .wifi_devices
+                    .get_mut(&path)
+                    .unwrap()
+                    .active_ap = active_ap;
             }
             Subscription::AccessPointProperties(_path) => {}
         }
