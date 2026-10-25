@@ -282,7 +282,38 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                     device.state = new_state;
                 }
             }
-            Subscription::WirelessProperties(_path) => {}
+            Subscription::WirelessProperties(path) => {
+                let (_, properties, invalidated) = match PropertiesChanged::parse(&event.msg) {
+                    Ok(body) => body,
+                    Err(error) => {
+                        eprintln!("NetworkManager: invalid Wireless PropertiesChanged: {error:?}");
+                        return;
+                    }
+                };
+
+                let access_point_path =
+                    if invalidated.iter().any(|name| name == "ActiveAccessPoint") {
+                        None
+                    } else {
+                        let Some(path) =
+                            changed_property::<ObjectPath>(&properties, "ActiveAccessPoint")
+                        else {
+                            continue;
+                        };
+                        (path.as_str() != "/").then_some(path)
+                    };
+
+                let Some(device) = state.wifi_devices.get(path) else {
+                    continue;
+                };
+                if device.active_ap.as_ref().map(|ap| &ap.path) == access_point_path.as_ref() {
+                    continue;
+                }
+
+                // TODO: clear the tracked AP and clean up its subscription/pending reads.
+
+                // TODO: map access_point_path into the new AP, subscribing and requesting properties.
+            }
             Subscription::AccessPointProperties(_path) => {}
         }
     }
