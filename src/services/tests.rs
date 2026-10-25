@@ -238,6 +238,7 @@ fn install_starts_with_disabled_flags_manager_matches_and_one_request() {
     assert!(!state.wireless_hardware_enabled);
     assert!(!state.wireless_enabled);
     assert!(state.wifi_devices.is_empty());
+    assert!(state.current_device.is_none());
     assert!(state.subscriptions.is_empty());
     assert_eq!(state.pending.len(), 1);
     pending_call(&app, |kind| matches!(kind, CallType::GetAll));
@@ -279,6 +280,7 @@ fn empty_missing_or_invalid_devices_leave_discovery_empty() {
         );
         assert!(state.pending.is_empty());
         assert!(state.wifi_devices.is_empty());
+        assert!(state.current_device.is_none());
         assert!(state.subscriptions.is_empty());
     }
 }
@@ -312,6 +314,7 @@ fn failed_or_malformed_manager_reply_leaves_initial_state() {
         assert!(!state.wireless_enabled);
         assert!(state.pending.is_empty());
         assert!(state.wifi_devices.is_empty());
+        assert!(state.current_device.is_none());
         assert!(state.subscriptions.is_empty());
         assert!(state.properties_changed.is_some());
         assert!(state.device_added.is_some());
@@ -340,7 +343,78 @@ fn non_wifi_missing_or_invalid_device_type_is_not_stored() {
         let state = app.resource::<NMState>();
         assert!(state.pending.is_empty());
         assert!(state.wifi_devices.is_empty());
+        assert!(state.current_device.is_none());
         assert!(state.subscriptions.is_empty());
+    }
+}
+
+#[test]
+fn current_device_stays_none_until_a_wifi_device_is_confirmed() {
+    let ethernet = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let wifi = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");
+    for wifi_state in [30, 100] {
+        let (mut app, _peer) = setup();
+        assert!(app.resource::<NMState>().current_device.is_none());
+
+        discover(&mut app, &[ethernet.clone(), wifi.clone()]);
+        assert!(app.resource::<NMState>().current_device.is_none());
+        assert_eq!(app.resource::<NMState>().pending.len(), 2);
+
+        let call = device_call(&app, &ethernet);
+        reply_properties(&mut app, call, device_properties(1, 100));
+        let state = app.resource::<NMState>();
+        assert!(state.current_device.is_none());
+        assert!(state.wifi_devices.is_empty());
+        assert!(state.subscriptions.is_empty());
+        assert_eq!(state.pending.len(), 1);
+
+        let call = device_call(&app, &wifi);
+        reply_properties(&mut app, call, device_properties(2, wifi_state));
+        let state = app.resource::<NMState>();
+        assert_eq!(state.current_device.as_ref(), Some(&wifi));
+        assert!(state.wifi_devices.contains_key(&wifi));
+        assert_eq!(state.wifi_devices.len(), 1);
+        assert_eq!(state.pending.len(), usize::from(wifi_state == 100));
+        assert_device(&app, &wifi, None);
+    }
+}
+
+#[test]
+fn current_device_stays_none_when_all_device_reads_fail() {
+    let malformed = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let timed_out = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");
+    let disappeared = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/3");
+    let (mut app, _peer) = setup();
+    discover(
+        &mut app,
+        &[malformed.clone(), timed_out.clone(), disappeared.clone()],
+    );
+    assert!(app.resource::<NMState>().current_device.is_none());
+
+    let malformed_call = device_call(&app, &malformed);
+    let timed_out_call = device_call(&app, &timed_out);
+    let disappeared_call = device_call(&app, &disappeared);
+    let replies = [
+        (
+            disappeared_call,
+            Err(CallError::Remote {
+                name: "org.freedesktop.DBus.Error.UnknownObject".into(),
+                message: "device disappeared".into(),
+            }),
+        ),
+        (
+            malformed_call,
+            Ok(Message::method_return(malformed_call.serial).with_body(&(false,))),
+        ),
+        (timed_out_call, Err(CallError::Timeout)),
+    ];
+    for (index, (call, result)) in replies.into_iter().enumerate() {
+        reply(&mut app, call, result);
+        let state = app.resource::<NMState>();
+        assert!(state.current_device.is_none());
+        assert!(state.wifi_devices.is_empty());
+        assert!(state.subscriptions.is_empty());
+        assert_eq!(state.pending.len(), 2 - index);
     }
 }
 
@@ -391,13 +465,17 @@ fn mixed_devices_initialize_independently_with_out_of_order_replies() {
         ],
     );
     for (path, device_type, state) in [
+        (&disconnected, 2, 30),
         (&second, 2, 100),
         (&ethernet, 1, 100),
-        (&disconnected, 2, 30),
         (&first, 2, 100),
     ] {
         let call = device_call(&app, path);
         reply_properties(&mut app, call, device_properties(device_type, state));
+        assert_eq!(
+            app.resource::<NMState>().current_device.as_ref(),
+            Some(&disconnected)
+        );
     }
     assert_eq!(app.resource::<NMState>().wifi_devices.len(), 3);
     assert!(
@@ -440,6 +518,7 @@ fn mixed_devices_initialize_independently_with_out_of_order_replies() {
     assert_device(&app, &second, Some((&second_ap, b"Guest", 28)));
     assert_device(&app, &disconnected, None);
     let state = app.resource::<NMState>();
+    assert_eq!(state.current_device.as_ref(), Some(&disconnected));
     assert!(state.pending.is_empty());
     assert_eq!(state.wifi_devices.len(), 3);
     assert_eq!(state.subscriptions.len(), 8);
