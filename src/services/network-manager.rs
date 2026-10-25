@@ -156,6 +156,8 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
             {
                 eprintln!("NetworkManager unavailable, clearing all pending calls");
                 state.pending.clear();
+                // TODO: clear all Wifi related things as well, not just the
+                // pending list
                 return;
             }
             Err(error) => {
@@ -288,9 +290,16 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 return;
             }
 
-            // subscribe to PropertiesChanged to track Access Point changes
-            // This is necessary for Roaming, where the State of the device
-            // doesn't change, but the AccessPoint does.
+            if app
+                .resource::<NMState>()
+                .wifi_devices
+                .get(&path)
+                .is_some_and(|device| device.active_ap.is_some())
+            {
+                return; // make sure access point hasn't changed from beneath us while initialising
+            }
+
+            // Subscribe to PropertiesChanged to track this access point's SSID and strength.
             let properties_changed = app.resource_mut::<DBus>().system().watch_properties(
                 NM,
                 access_point_path.clone(),
