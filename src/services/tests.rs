@@ -164,6 +164,21 @@ fn connected_device(app: &mut App, device: &ObjectPath) {
     active_ap_call(app, device);
 }
 
+fn state_changed_signal(
+    path: &ObjectPath,
+    id: MatchId,
+    new_state: u32,
+    old_state: u32,
+) -> SignalReceived {
+    SignalReceived {
+        bus: BusId::System,
+        matches: [id].into_iter().collect(),
+        msg: Message::signal(path.clone(), NM_DEVICE, "StateChanged")
+            .with_sender(NM)
+            .with_body(&(new_state, old_state, 1u32)),
+    }
+}
+
 fn assert_device(app: &App, path: &ObjectPath, ap: Option<(&ObjectPath, &[u8], u8)>) {
     let state = app.resource::<NMState>();
     let device = state.wifi_devices.get(path).expect("missing Wi-Fi device");
@@ -447,10 +462,14 @@ fn wifi_state_controls_initial_ap_read_but_not_device_subscriptions() {
     let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
     let mut cases: Vec<_> = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]
         .into_iter()
-        .map(|state| (Some(Value::U32(state)), state == 100))
+        .map(|state| (Some(Value::U32(state)), state))
         .collect();
-    cases.extend([(None, false), (Some(Value::Str("100".into())), false)]);
-    for (value, activated) in cases {
+    cases.extend([
+        (None, nm_device_state::UNKNOWN),
+        (Some(Value::Str("100".into())), nm_device_state::UNKNOWN),
+    ]);
+    for (value, expected_state) in cases {
+        let activated = expected_state == nm_device_state::ACTIVE;
         let (mut app, _peer) = setup();
         discover(&mut app, std::slice::from_ref(&path));
         let call = device_call(&app, &path);
@@ -462,12 +481,118 @@ fn wifi_state_controls_initial_ap_read_but_not_device_subscriptions() {
         assert_device(&app, &path, None);
         let state = app.resource::<NMState>();
         assert_eq!(state.wifi_devices.len(), 1);
+        assert_eq!(state.wifi_devices[&path].state, expected_state);
         assert_eq!(state.subscriptions.len(), 2);
         assert_eq!(state.pending.len(), usize::from(activated));
         if activated {
             active_ap_call(&app, &path);
         }
     }
+}
+
+#[test]
+fn state_changed_updates_only_its_device_and_keeps_ap_tracking() {
+    let selected = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let other = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");
+    let selected_ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/10");
+    let other_ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/20");
+    let (mut app, _peer) = setup();
+    discover(&mut app, &[selected.clone(), other.clone()]);
+    for (path, ap) in [(&selected, &selected_ap), (&other, &other_ap)] {
+        let call = device_call(&app, path);
+        reply_properties(
+            &mut app,
+            call,
+            device_properties(nm_device_type::WIFI, nm_device_state::ACTIVE),
+        );
+        read_active_ap(&mut app, path, ap);
+        let call = ap_properties_call(&app, path, ap);
+        reply_properties(
+            &mut app,
+            call,
+            PropMap::from([
+                ("Ssid".into(), ssid_value(b"Office")),
+                ("Strength".into(), Value::U8(75)),
+            ]),
+        );
+    }
+
+    for (target, untouched) in [(&other, &selected), (&selected, &other)] {
+        let id = app.resource::<NMState>().wifi_devices[target]
+            .state_changed
+            .unwrap();
+        let mut old_state = nm_device_state::ACTIVE;
+        for new_state in [
+            nm_device_state::DEACTIVATING,
+            nm_device_state::DISCONNECTED,
+            nm_device_state::UNKNOWN,
+            10,  // UNMANAGED
+            20,  // UNAVAILABLE
+            40,  // PREPARE
+            120, // FAILED
+            nm_device_state::ACTIVE,
+            nm_device_state::ACTIVE, // Repeated notifications are harmless.
+        ] {
+            app.signal(state_changed_signal(target, id, new_state, old_state));
+            app.flush();
+            let state = app.resource::<NMState>();
+            assert_eq!(state.wifi_devices[target].state, new_state);
+            assert_eq!(state.wifi_devices[untouched].state, nm_device_state::ACTIVE);
+            assert_eq!(state.current_device.as_ref(), Some(&selected));
+            assert_eq!(state.subscriptions.len(), 6);
+            assert!(state.pending.is_empty());
+            assert_device(&app, &selected, Some((&selected_ap, b"Office", 75)));
+            assert_device(&app, &other, Some((&other_ap, b"Office", 75)));
+            old_state = new_state;
+        }
+    }
+}
+
+#[test]
+fn malformed_and_wrong_bus_state_changes_preserve_stored_state() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let (mut app, _peer) = setup();
+    connected_device(&mut app, &path);
+    let id = app.resource::<NMState>().wifi_devices[&path]
+        .state_changed
+        .unwrap();
+    for msg in [
+        Message::signal(path.clone(), NM_DEVICE, "StateChanged")
+            .with_body(&(nm_device_state::DISCONNECTED, nm_device_state::ACTIVE)),
+        Message::signal(path.clone(), NM_DEVICE, "StateChanged").with_body(&(
+            "disconnected",
+            nm_device_state::ACTIVE,
+            1u32,
+        )),
+    ] {
+        app.signal(SignalReceived {
+            bus: BusId::System,
+            matches: [id].into_iter().collect(),
+            msg: msg.with_sender(NM),
+        });
+        app.flush();
+        assert_eq!(
+            app.resource::<NMState>().wifi_devices[&path].state,
+            nm_device_state::ACTIVE
+        );
+    }
+
+    let mut event = state_changed_signal(
+        &path,
+        id,
+        nm_device_state::DISCONNECTED,
+        nm_device_state::ACTIVE,
+    );
+    event.bus = BusId::Session;
+    app.signal(event);
+    app.flush();
+    assert_eq!(
+        app.resource::<NMState>().wifi_devices[&path].state,
+        nm_device_state::ACTIVE
+    );
+    assert_device(&app, &path, None);
+    assert_eq!(app.resource::<NMState>().subscriptions.len(), 2);
+    active_ap_call(&app, &path);
 }
 
 #[test]
@@ -783,7 +908,16 @@ fn device_removed_clears_pending_active_ap_read() {
     let (mut app, _peer) = setup();
     connected_device(&mut app, &path);
     let call = active_ap_call(&app, &path);
+    let state_match = app.resource::<NMState>().wifi_devices[&path]
+        .state_changed
+        .unwrap();
     remove_device(&mut app, &path);
+    app.signal(state_changed_signal(
+        &path,
+        state_match,
+        nm_device_state::ACTIVE,
+        nm_device_state::DISCONNECTED,
+    ));
     app.signal(MethodReply {
         call,
         result: Ok(
@@ -865,10 +999,18 @@ fn device_added_overlapping_initial_discovery_keeps_one_device_and_subscription_
         let device = &state.wifi_devices[&path];
         let matches = (device.state_changed, device.wireless_properties_changed);
 
+        app.signal(state_changed_signal(
+            &path,
+            matches.0.unwrap(),
+            nm_device_state::DEACTIVATING,
+            nm_device_state::ACTIVE,
+        ));
+        app.flush();
         reply_properties(&mut app, second, device_properties(2, 100));
         assert_device(&app, &path, None);
         let state = app.resource::<NMState>();
         let device = &state.wifi_devices[&path];
+        assert_eq!(device.state, nm_device_state::DEACTIVATING);
         assert_eq!(
             matches,
             (device.state_changed, device.wireless_properties_changed)
