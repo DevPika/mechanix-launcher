@@ -418,5 +418,16 @@ fn unwrap_property<T: Decode + Type + Default>(properties: &PropMap, name: &str)
     }
 }
 
+fn changed_property<T: Decode + Type>(properties: &PropMap, name: &str) -> Option<T> {
+    match properties.get_as::<T>(name) {
+        Some(Ok(value)) => Some(value),
+        Some(Err(error)) => {
+            eprintln!("NetworkManager: invalid {name}: {error:?}");
+            None
+        }
+        None => None,
+    }
+}
+
 #[cfg(test)]
 mod tests;
