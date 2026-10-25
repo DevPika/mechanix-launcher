@@ -150,12 +150,63 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
         return;
     }
 
-    let mut state = app.resource_mut::<NMState>();
     for match_id in &event.matches {
+        let mut state = app.resource_mut::<NMState>();
         if state.device_added == Some(*match_id) {
             continue;
         }
         if state.device_removed == Some(*match_id) {
+            let (path,) = match event.msg.body::<(ObjectPath,)>() {
+                Ok(body) => body,
+                Err(error) => {
+                    eprintln!("NetworkManager: invalid DeviceRemoved: {error:?}");
+                    return;
+                }
+            };
+
+            // remove stored matches for this device
+            let matches = match state.wifi_devices.remove(&path) {
+                Some(device) => [
+                    device.state_changed,
+                    device.wireless_properties_changed,
+                    device.active_ap.and_then(|ap| ap.properties_changed),
+                ],
+                None => [None; 3], // don't continue here, pending calls cleanup needs to happen
+            };
+            for id in matches.iter().flatten() {
+                state.subscriptions.remove(id);
+            }
+
+            /*
+            Remove pending calls.
+
+            This is to guard against a very rare case: if NetworkManager sends
+            something to DBus, and before DBus sends it to us, we receive a
+            DeviceRemoved.
+
+            We should then clean up all of these things so that DBus doesn't
+            send us data from an expired device
+            */
+            state.pending.retain(|_, call| match call {
+                CallType::DeviceProperties(device_path)
+                | CallType::ActiveAccessPoint(device_path)
+                | CallType::AccessPointProperties { device_path, .. } => device_path != &path,
+                CallType::GetAll => true,
+            });
+
+            // modify current device to next device
+            // TODO: do some sorting here to prefer something that's Active
+            if state.current_device.as_ref() == Some(&path) {
+                state.current_device = state.wifi_devices.keys().next().cloned();
+            }
+
+            let mut dbus = app.resource_mut::<DBus>();
+            let mut bus = dbus.system();
+            for id in matches.into_iter().flatten() {
+                bus.remove_match(id);
+            }
+
+            // TODO: send events here
             continue;
         }
         if state.properties_changed == Some(*match_id) {
