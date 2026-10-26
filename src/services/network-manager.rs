@@ -237,28 +237,12 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                         .as_ref()
                         .and_then(|path| state.wifi_devices.get(path))
                 {
-                    let wifi_state = match device.state {
-                        nm_device_state::UNMANAGED | nm_device_state::UNAVAILABLE => {
-                            WifiState::Unavailable
-                        }
-                        nm_device_state::DISCONNECTED | nm_device_state::FAILED => {
-                            WifiState::Disconnected
-                        }
-                        nm_device_state::PREPARE
-                        | nm_device_state::CONFIG
-                        | nm_device_state::NEED_AUTH
-                        | nm_device_state::IP_CONFIG
-                        | nm_device_state::IP_CHECK
-                        | nm_device_state::SECONDARIES => WifiState::Connecting,
-                        nm_device_state::ACTIVE => WifiState::Connected,
-                        nm_device_state::DEACTIVATING => WifiState::Disconnecting,
-                        _ => WifiState::On,
-                    };
+                    let device_state = device.state;
                     let access_point = device
                         .active_ap
                         .as_ref()
                         .map(|ap| (ap.ssid.clone(), ap.strength));
-                    events::emit_state_update(app, wifi_state);
+                    events::emit_device_state_update(app, device_state);
                     if let Some((ssid, strength)) = access_point {
                         events::emit_ap_update(app, Some(ssid), strength);
                     }
@@ -515,24 +499,8 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 // DeviceAdded may finish discovery before the manager's initial
                 // reply. Publish its latest state now that the flags are known.
                 // Otherwise, leave the initial update to the device reply.
-                let wifi_state = match device.state {
-                    nm_device_state::UNMANAGED | nm_device_state::UNAVAILABLE => {
-                        WifiState::Unavailable
-                    }
-                    nm_device_state::DISCONNECTED | nm_device_state::FAILED => {
-                        WifiState::Disconnected
-                    }
-                    nm_device_state::PREPARE
-                    | nm_device_state::CONFIG
-                    | nm_device_state::NEED_AUTH
-                    | nm_device_state::IP_CONFIG
-                    | nm_device_state::IP_CHECK
-                    | nm_device_state::SECONDARIES => WifiState::Connecting,
-                    nm_device_state::ACTIVE => WifiState::Connected,
-                    nm_device_state::DEACTIVATING => WifiState::Disconnecting,
-                    _ => WifiState::On,
-                };
-                events::emit_state_update(app, wifi_state);
+                let device_state = device.state;
+                events::emit_device_state_update(app, device_state);
             }
 
             // Request all properties on devices
@@ -614,24 +582,7 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 && state.wireless_hardware_enabled
                 && state.wireless_enabled
             {
-                let wifi_state = match device_state {
-                    nm_device_state::UNMANAGED | nm_device_state::UNAVAILABLE => {
-                        WifiState::Unavailable
-                    }
-                    nm_device_state::DISCONNECTED | nm_device_state::FAILED => {
-                        WifiState::Disconnected
-                    }
-                    nm_device_state::PREPARE
-                    | nm_device_state::CONFIG
-                    | nm_device_state::NEED_AUTH
-                    | nm_device_state::IP_CONFIG
-                    | nm_device_state::IP_CHECK
-                    | nm_device_state::SECONDARIES => WifiState::Connecting,
-                    nm_device_state::ACTIVE => WifiState::Connected,
-                    nm_device_state::DEACTIVATING => WifiState::Disconnecting,
-                    _ => WifiState::On,
-                };
-                events::emit_state_update(app, wifi_state);
+                events::emit_device_state_update(app, device_state);
             }
 
             // if we're currently connected, get access point information

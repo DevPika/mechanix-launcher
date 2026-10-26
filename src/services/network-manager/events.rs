@@ -1,5 +1,7 @@
 use mecha_wayland::prelude::*;
 
+use super::nm_device_state;
+
 /// Wi-Fi availability and connection status for the selected device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WifiState {
@@ -34,6 +36,25 @@ pub struct APUpdate {
     pub strength: u8,
 }
 impl Event for APUpdate {}
+
+/// Map a NetworkManager device state and broadcast it to the UI.
+/// The caller checks device selection and manager flags before emitting.
+pub(super) fn emit_device_state_update(app: &mut App, device_state: u32) {
+    let state = match device_state {
+        nm_device_state::UNMANAGED | nm_device_state::UNAVAILABLE => WifiState::Unavailable,
+        nm_device_state::DISCONNECTED | nm_device_state::FAILED => WifiState::Disconnected,
+        nm_device_state::PREPARE
+        | nm_device_state::CONFIG
+        | nm_device_state::NEED_AUTH
+        | nm_device_state::IP_CONFIG
+        | nm_device_state::IP_CHECK
+        | nm_device_state::SECONDARIES => WifiState::Connecting,
+        nm_device_state::ACTIVE => WifiState::Connected,
+        nm_device_state::DEACTIVATING => WifiState::Disconnecting,
+        _ => WifiState::On,
+    };
+    emit_state_update(app, state);
+}
 
 /// Broadcast a selected-device state update to the UI.
 /// The caller decides when to emit, including when the selected device changes.
