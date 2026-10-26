@@ -229,6 +229,40 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
             // TODO: do some sorting here to prefer something that's Active
             if state.current_device.as_ref() == Some(&path) {
                 state.current_device = state.wifi_devices.keys().next().cloned();
+                if state.networking_enabled
+                    && state.wireless_hardware_enabled
+                    && state.wireless_enabled
+                    && let Some(device) = state
+                        .current_device
+                        .as_ref()
+                        .and_then(|path| state.wifi_devices.get(path))
+                {
+                    let wifi_state = match device.state {
+                        nm_device_state::UNMANAGED | nm_device_state::UNAVAILABLE => {
+                            WifiState::Unavailable
+                        }
+                        nm_device_state::DISCONNECTED | nm_device_state::FAILED => {
+                            WifiState::Disconnected
+                        }
+                        nm_device_state::PREPARE
+                        | nm_device_state::CONFIG
+                        | nm_device_state::NEED_AUTH
+                        | nm_device_state::IP_CONFIG
+                        | nm_device_state::IP_CHECK
+                        | nm_device_state::SECONDARIES => WifiState::Connecting,
+                        nm_device_state::ACTIVE => WifiState::Connected,
+                        nm_device_state::DEACTIVATING => WifiState::Disconnecting,
+                        _ => WifiState::On,
+                    };
+                    let access_point = device
+                        .active_ap
+                        .as_ref()
+                        .map(|ap| (ap.ssid.clone(), ap.strength));
+                    events::emit_state_update(app, wifi_state);
+                    if let Some((ssid, strength)) = access_point {
+                        events::emit_ap_update(app, Some(ssid), strength);
+                    }
+                }
             }
 
             let mut dbus = app.resource_mut::<DBus>();
@@ -236,8 +270,6 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
             for id in matches.into_iter().flatten() {
                 bus.remove_match(id);
             }
-
-            // TODO: send events here
             continue;
         }
         if state.properties_changed == Some(*match_id) {

@@ -1849,8 +1849,13 @@ fn device_removed_cleans_subscriptions_and_only_replaces_the_removed_selection()
     read_active_ap(&mut app, &remaining, &remaining_ap);
     let other_call = ap_properties_call(&app, &other, &other_ap);
     let remaining_call = ap_properties_call(&app, &remaining, &remaining_ap);
+    app.init_resource::<StateUpdates>()
+        .system(record_state_update);
+    app.init_resource::<APUpdates>().system(record_ap_update);
 
     remove_device(&mut app, &other);
+    assert!(app.resource::<StateUpdates>().0.is_empty());
+    assert!(app.resource::<APUpdates>().0.is_empty());
     let state = app.resource::<NMState>();
     assert_eq!(state.current_device.as_ref(), Some(&selected));
     assert_eq!(state.wifi_devices.len(), 2);
@@ -1881,6 +1886,17 @@ fn device_removed_cleans_subscriptions_and_only_replaces_the_removed_selection()
     assert_eq!(state.subscriptions.len(), 3);
     assert_eq!(state.pending.len(), 1);
     assert_device(&app, &remaining, Some((&remaining_ap, b"", 0)));
+    assert_eq!(
+        std::mem::take(&mut app.resource_mut::<StateUpdates>().0),
+        vec![WifiState::Connected]
+    );
+    assert_eq!(
+        std::mem::take(&mut app.resource_mut::<APUpdates>().0),
+        vec![APUpdate {
+            ssid: Some(Vec::new()),
+            strength: 0
+        }]
+    );
 
     remove_device(&mut app, &remaining);
     let state = app.resource::<NMState>();
@@ -1891,6 +1907,82 @@ fn device_removed_cleans_subscriptions_and_only_replaces_the_removed_selection()
     assert!(state.properties_changed.is_some());
     assert!(state.device_added.is_some());
     assert!(state.device_removed.is_some());
+    assert!(app.resource::<StateUpdates>().0.is_empty());
+    assert!(app.resource::<APUpdates>().0.is_empty());
+}
+
+#[test]
+fn device_removed_refreshes_replacement_details_only_when_manager_flags_are_enabled() {
+    let selected = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let remaining = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");
+    let ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/20");
+    for flags in 0..8 {
+        for has_ap in [false, true] {
+            let (mut app, _peer) = setup();
+            discover(&mut app, &[selected.clone(), remaining.clone()]);
+            for path in [&selected, &remaining] {
+                let call = device_call(&app, path);
+                reply_properties(
+                    &mut app,
+                    call,
+                    device_properties(nm_device_type::WIFI, nm_device_state::ACTIVE),
+                );
+            }
+            if has_ap {
+                initialize_ap(&mut app, &remaining, &ap, b"replacement\xff", 73);
+            }
+            // Use the replacement's latest state, not its initial discovery state.
+            let id = app.resource::<NMState>().wifi_devices[&remaining]
+                .state_changed
+                .unwrap();
+            app.signal(state_changed_signal(
+                &remaining,
+                id,
+                nm_device_state::PREPARE,
+                nm_device_state::ACTIVE,
+            ));
+            app.flush();
+            {
+                let mut state = app.resource_mut::<NMState>();
+                state.networking_enabled = flags & 1 != 0;
+                state.wireless_hardware_enabled = flags & 2 != 0;
+                state.wireless_enabled = flags & 4 != 0;
+            }
+            app.init_resource::<StateUpdates>()
+                .system(record_state_update);
+            app.init_resource::<APUpdates>().system(record_ap_update);
+
+            remove_device(&mut app, &selected);
+            assert_eq!(
+                app.resource::<NMState>().current_device.as_ref(),
+                Some(&remaining)
+            );
+            assert_device(
+                &app,
+                &remaining,
+                has_ap.then_some((&ap, b"replacement\xff".as_slice(), 73)),
+            );
+            assert_eq!(
+                app.resource::<StateUpdates>().0,
+                if flags == 7 {
+                    vec![WifiState::Connecting]
+                } else {
+                    Vec::new()
+                }
+            );
+            assert_eq!(
+                app.resource::<APUpdates>().0,
+                if flags == 7 && has_ap {
+                    vec![APUpdate {
+                        ssid: Some(b"replacement\xff".to_vec()),
+                        strength: 73,
+                    }]
+                } else {
+                    Vec::new()
+                }
+            );
+        }
+    }
 }
 
 #[test]
