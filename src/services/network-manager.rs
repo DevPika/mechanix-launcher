@@ -418,11 +418,20 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                         properties_changed: Some(properties_changed),
                     }
                 });
-                app.resource_mut::<NMState>()
-                    .wifi_devices
-                    .get_mut(&path)
-                    .unwrap()
-                    .active_ap = active_ap;
+                let mut state = app.resource_mut::<NMState>();
+                let should_emit = state.current_device.as_ref() == Some(&path)
+                    && state.networking_enabled
+                    && state.wireless_hardware_enabled
+                    && state.wireless_enabled;
+                if let Some(device) = state.wifi_devices.get_mut(&path) {
+                    device.active_ap = active_ap;
+                    if should_emit {
+                        // A replacement starts with unknown details; None clears
+                        // the previous AP. Its property reply will fill in details.
+                        let ssid = device.active_ap.as_ref().map(|ap| ap.ssid.clone());
+                        events::emit_ap_update(app, ssid, 0);
+                    }
+                }
             }
             Subscription::AccessPointProperties(path) => {
                 let (_, properties, invalidated) = match PropertiesChanged::parse(&event.msg) {

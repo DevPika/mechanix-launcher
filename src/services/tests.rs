@@ -1066,6 +1066,9 @@ fn wireless_ap_replacement_cleans_only_its_device_and_ignores_late_reply() {
     }
     let old_call = ap_properties_call(&app, &path, &old_ap);
     let other_call = ap_properties_call(&app, &other, &other_ap);
+    app.init_resource::<APUpdates>().system(record_ap_update);
+    app.init_resource::<StateUpdates>()
+        .system(record_state_update);
     let old_match = app.resource::<NMState>().wifi_devices[&path]
         .active_ap
         .as_ref()
@@ -1083,6 +1086,7 @@ fn wireless_ap_replacement_cleans_only_its_device_and_ignores_late_reply() {
             changed.insert("ActiveAccessPoint".into(), value);
         }
         wireless_change(&mut app, &path, changed, &[]);
+        assert!(app.resource::<APUpdates>().0.is_empty());
         assert_device(&app, &path, Some((&old_ap, b"", 0)));
         assert!(app.resource::<NMState>().pending.contains_key(&old_call));
         assert!(
@@ -1118,6 +1122,13 @@ fn wireless_ap_replacement_cleans_only_its_device_and_ignores_late_reply() {
         .properties_changed
         .unwrap();
     assert_ne!(new_match, old_match);
+    assert_eq!(
+        std::mem::take(&mut app.resource_mut::<APUpdates>().0),
+        vec![APUpdate {
+            ssid: Some(Vec::new()),
+            strength: 0
+        }]
+    );
 
     // Repeated notifications preserve both the subscription and its pending read.
     wireless_change(
@@ -1152,6 +1163,7 @@ fn wireless_ap_replacement_cleans_only_its_device_and_ignores_late_reply() {
     });
     app.flush();
     assert_device(&app, &path, Some((&new_ap, b"", 0)));
+    assert!(app.resource::<APUpdates>().0.is_empty());
     reply_properties(
         &mut app,
         new_call,
@@ -1162,6 +1174,14 @@ fn wireless_ap_replacement_cleans_only_its_device_and_ignores_late_reply() {
     );
     assert_device(&app, &path, Some((&new_ap, b"New AP", 65)));
     assert_device(&app, &other, Some((&other_ap, b"", 0)));
+    assert_eq!(
+        app.resource::<APUpdates>().0,
+        vec![APUpdate {
+            ssid: Some(b"New AP".to_vec()),
+            strength: 65
+        }]
+    );
+    assert!(app.resource::<StateUpdates>().0.is_empty());
 }
 
 #[test]
@@ -1184,6 +1204,7 @@ fn wireless_ap_clear_supersedes_pending_initial_and_ap_property_reads() {
             } else {
                 active_ap_call(&app, &path)
             };
+            app.init_resource::<APUpdates>().system(record_ap_update);
             // Invalidation takes precedence even when a non-root path is supplied.
             wireless_change(
                 &mut app,
@@ -1205,6 +1226,15 @@ fn wireless_ap_clear_supersedes_pending_initial_and_ap_property_reads() {
             assert_device(&app, &path, None);
             assert!(app.resource::<NMState>().pending.is_empty());
             assert_eq!(app.resource::<NMState>().subscriptions.len(), 2);
+            let expected = if ap_known {
+                vec![APUpdate {
+                    ssid: None,
+                    strength: 0,
+                }]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(app.resource::<APUpdates>().0, expected);
 
             let message = if ap_known {
                 Message::method_return(call.serial)
@@ -1220,6 +1250,66 @@ fn wireless_ap_clear_supersedes_pending_initial_and_ap_property_reads() {
             assert_device(&app, &path, None);
             assert!(app.resource::<NMState>().pending.is_empty());
             assert_eq!(app.resource::<NMState>().subscriptions.len(), 2);
+            assert_eq!(app.resource::<APUpdates>().0, expected);
+        }
+    }
+}
+
+#[test]
+fn wireless_ap_events_require_selected_device_and_all_manager_flags() {
+    let selected = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let other = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");
+    let ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/10");
+    for flags in 0..8 {
+        let (mut app, _peer) = setup();
+        discover(&mut app, &[selected.clone(), other.clone()]);
+        for path in [&selected, &other] {
+            let call = device_call(&app, path);
+            reply_properties(
+                &mut app,
+                call,
+                device_properties(nm_device_type::WIFI, nm_device_state::DISCONNECTED),
+            );
+        }
+        {
+            let mut state = app.resource_mut::<NMState>();
+            state.networking_enabled = flags & 1 != 0;
+            state.wireless_hardware_enabled = flags & 2 != 0;
+            state.wireless_enabled = flags & 4 != 0;
+        }
+        app.init_resource::<APUpdates>().system(record_ap_update);
+        app.init_resource::<StateUpdates>()
+            .system(record_state_update);
+        for path in [&other, &selected] {
+            wireless_change(
+                &mut app,
+                path,
+                PropMap::from([("ActiveAccessPoint".into(), Value::ObjectPath(ap.clone()))]),
+                &[],
+            );
+            assert_device(&app, path, Some((&ap, b"", 0)));
+            ap_properties_call(&app, path, &ap);
+            wireless_change(&mut app, path, PropMap::new(), &["ActiveAccessPoint"]);
+            assert_device(&app, path, None);
+            assert!(app.resource::<NMState>().pending.is_empty());
+            assert_eq!(
+                std::mem::take(&mut app.resource_mut::<APUpdates>().0),
+                if flags == 7 && path == &selected {
+                    vec![
+                        APUpdate {
+                            ssid: Some(Vec::new()),
+                            strength: 0,
+                        },
+                        APUpdate {
+                            ssid: None,
+                            strength: 0,
+                        },
+                    ]
+                } else {
+                    Vec::new()
+                }
+            );
+            assert!(app.resource::<StateUpdates>().0.is_empty());
         }
     }
 }
