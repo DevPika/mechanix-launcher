@@ -2386,6 +2386,8 @@ fn unknown_match_is_skipped_and_does_not_hide_a_later_matching_subscription() {
 fn manager_partial_values_and_invalidations_update_only_valid_named_flags() {
     let (mut app, _peer) = setup();
     discover(&mut app, &[]);
+    app.init_resource::<StateUpdates>()
+        .system(record_state_update);
     let id = app.resource::<NMState>().properties_changed.unwrap();
     for target in [
         "NetworkingEnabled",
@@ -2442,7 +2444,85 @@ fn manager_partial_values_and_invalidations_update_only_valid_named_flags() {
             }
             assert!(state.pending.is_empty());
             assert!(state.wifi_devices.is_empty());
+            let expected_events = if expected {
+                Vec::new()
+            } else if target == "WirelessEnabled" {
+                vec![WifiState::Off]
+            } else {
+                vec![WifiState::Unavailable]
+            };
+            assert_eq!(
+                std::mem::take(&mut app.resource_mut::<StateUpdates>().0),
+                expected_events
+            );
         }
+    }
+}
+
+#[test]
+fn manager_properties_changed_respects_precedence_and_refreshes_latest_selected_state() {
+    let selected = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let other = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");
+    let (mut app, _peer) = setup();
+    discover(&mut app, &[selected.clone(), other.clone()]);
+    for path in [&selected, &other] {
+        let call = device_call(&app, path);
+        reply_properties(
+            &mut app,
+            call,
+            device_properties(nm_device_type::WIFI, nm_device_state::DISCONNECTED),
+        );
+    }
+    app.init_resource::<StateUpdates>()
+        .system(record_state_update);
+    let id = app.resource::<NMState>().properties_changed.unwrap();
+    let device_id = app.resource::<NMState>().wifi_devices[&selected]
+        .state_changed
+        .unwrap();
+    for flags in 0..8 {
+        if flags == 7 {
+            // Networking is still disabled from the previous signal. Its
+            // re-enabling must publish the state cached during that interval.
+            app.signal(state_changed_signal(
+                &selected,
+                device_id,
+                nm_device_state::PREPARE,
+                nm_device_state::DISCONNECTED,
+            ));
+            app.flush();
+            assert!(app.resource::<StateUpdates>().0.is_empty());
+        }
+        app.signal(SignalReceived {
+            bus: BusId::System,
+            matches: [id].into_iter().collect(),
+            msg: properties_message(
+                &ObjectPath::from(NM_MAIN_OBJ),
+                NM,
+                PropMap::from([
+                    ("NetworkingEnabled".into(), Value::Bool(flags & 1 != 0)),
+                    (
+                        "WirelessHardwareEnabled".into(),
+                        Value::Bool(flags & 2 != 0),
+                    ),
+                    ("WirelessEnabled".into(), Value::Bool(flags & 4 != 0)),
+                ]),
+            ),
+        });
+        app.flush();
+        let expected = if flags & 1 == 0 || flags & 2 == 0 {
+            WifiState::Unavailable
+        } else if flags & 4 == 0 {
+            WifiState::Off
+        } else {
+            WifiState::Connecting
+        };
+        assert_eq!(
+            std::mem::take(&mut app.resource_mut::<StateUpdates>().0),
+            vec![expected]
+        );
+        let state = app.resource::<NMState>();
+        assert_eq!(state.current_device.as_ref(), Some(&selected));
+        assert!(state.pending.is_empty());
     }
 }
 

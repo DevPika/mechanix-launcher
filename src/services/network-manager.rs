@@ -290,7 +290,20 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                 state.wireless_enabled = enabled;
             }
 
-            // TODO: events here
+            if !state.networking_enabled || !state.wireless_hardware_enabled {
+                events::emit_state_update(app, WifiState::Unavailable);
+            } else if !state.wireless_enabled {
+                events::emit_state_update(app, WifiState::Off);
+            } else if let Some(device) = state
+                .current_device
+                .as_ref()
+                .and_then(|path| state.wifi_devices.get(path))
+            {
+                // Device updates may have been suppressed while a manager flag
+                // was disabled. Publish the latest stored state when enabled.
+                let device_state = device.state;
+                events::emit_device_state_update(app, device_state);
+            }
             continue;
         }
 
