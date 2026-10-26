@@ -7,6 +7,11 @@ mod events;
 
 pub use events::{APUpdate, StateUpdate, WifiState};
 
+/// Request a change to NetworkManager's software Wi-Fi switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SetWifiEnabled(pub bool);
+impl Signal for SetWifiEnabled {}
+
 const NM: &str = "org.freedesktop.NetworkManager";
 const NM_MAIN_OBJ: &str = "/org/freedesktop/NetworkManager";
 const NM_DEVICE: &str = "org.freedesktop.NetworkManager.Device";
@@ -157,7 +162,22 @@ impl Module for NetworkManagerModule {
         });
         app.system(on_method_reply);
         app.system(on_signal_received);
+        app.system(on_set_wifi_enabled);
     }
+}
+
+/// Set NetworkManager's software Wi-Fi switch. The resulting
+/// PropertiesChanged signal updates [`NMState`] and emits a StateUpdate;
+/// callers must not update the cached state themselves.
+pub fn set_wifi_enabled(app: &mut App, enabled: bool) {
+    app.resource_mut::<DBus>()
+        .system()
+        .object(NM, NM_MAIN_OBJ)
+        .set_property(NM, "WirelessEnabled", Value::Bool(enabled));
+}
+
+fn on_set_wifi_enabled(app: &mut App, event: &SetWifiEnabled) {
+    set_wifi_enabled(app, event.0);
 }
 
 fn on_signal_received(app: &mut App, event: &SignalReceived) {
