@@ -18,7 +18,7 @@ impl Font {
     fn bytes(self) -> &'static [u8] {
         match self {
             Font::Geist => include_bytes!("../resources/Geist-Regular.ttf"),
-            Font::GeistMono => include_bytes!("../resources/GeistMono-Regular.ttf"),
+            Font::GeistMono => status_bar::GEIST_MONO_BYTES,
         }
     }
 }

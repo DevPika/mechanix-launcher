@@ -383,6 +383,7 @@ dependencies = [
  "mecha-wayland",
  "rustix",
  "serde",
+ "status-bar",
  "tracing",
  "xkbcommon",
  "yaml_serde",
