@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashSet;
 use std::io::Write;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::net::UnixStream;
@@ -307,6 +308,44 @@ fn setup() -> (TestApp, UnixStream) {
     (TestApp(app), peer)
 }
 
+fn initialized() -> (TestApp, UnixStream, ObjectPath, ObjectPath) {
+    let device = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/10");
+    let (mut app, peer) = setup();
+    connected_device(&mut app, &device);
+    initialize_ap(&mut app, &device, &ap, b"Office", 70);
+    (app, peer, device, ap)
+}
+
+fn subscription_ids(app: &App) -> HashSet<MatchId> {
+    app.resource::<NMState>()
+        .subscriptions
+        .keys()
+        .copied()
+        .collect()
+}
+
+fn assert_initialized(app: &App, device: &ObjectPath, ap: &ObjectPath) {
+    assert_device(app, device, Some((ap, b"Office", 70)));
+    let state = app.resource::<NMState>();
+    assert!(state.networking_enabled && state.wireless_hardware_enabled && state.wireless_enabled);
+    assert_eq!(state.current_device.as_ref(), Some(device));
+    assert_eq!(state.wifi_devices.len(), 1);
+    assert_eq!(state.wifi_devices[device].state, nm_device_state::ACTIVE);
+    assert_eq!(state.subscriptions.len(), 3);
+    assert!(state.pending.is_empty());
+}
+
+fn properties_message(path: &ObjectPath, interface: &str, changed: PropMap) -> Message {
+    Message::signal(
+        path.clone(),
+        "org.freedesktop.DBus.Properties",
+        "PropertiesChanged",
+    )
+    .with_sender(NM)
+    .with_body(&(interface, changed, Vec::<String>::new()))
+}
+
 #[test]
 fn get_all_reads_networking_hardware_and_wireless_flags_independently() {
     let (mut app, _peer) = setup();
@@ -367,12 +406,7 @@ fn install_starts_with_disabled_flags_manager_matches_and_one_request() {
         state.device_removed.unwrap(),
     ];
     assert!(ids.iter().all(|id| id.bus == BusId::System));
-    assert_eq!(
-        ids.into_iter()
-            .collect::<std::collections::HashSet<_>>()
-            .len(),
-        3
-    );
+    assert_eq!(ids.into_iter().collect::<HashSet<_>>().len(), 3);
 }
 
 #[test]
@@ -1712,5 +1746,498 @@ fn device_added_overlapping_initial_discovery_keeps_one_device_and_subscription_
         assert_eq!(state.subscriptions.len(), 2);
         assert_eq!(state.pending.len(), 1);
         assert!(state.pending.contains_key(&ap_call));
+    }
+}
+#[test]
+fn untracked_reply_ids_and_wrong_bus_serial_collisions_do_not_consume_pending_calls() {
+    let (mut app, _peer) = setup();
+    let pending = pending_call(&app, |kind| matches!(kind, CallType::GetAll));
+    for call in [
+        CallId {
+            bus: BusId::Session,
+            serial: pending.serial,
+        },
+        CallId {
+            bus: BusId::System,
+            serial: u32::MAX,
+        },
+    ] {
+        for result in [
+            Ok(Message::method_return(call.serial).with_body(&(false,))),
+            Err(CallError::Remote {
+                name: "org.freedesktop.DBus.Error.ServiceUnknown".into(),
+                message: "unrelated call failed".into(),
+            }),
+        ] {
+            app.signal(MethodReply { call, result });
+            app.flush();
+            let state = app.resource::<NMState>();
+            assert_eq!(state.pending.len(), 1);
+            assert!(state.pending.contains_key(&pending));
+            assert!(state.wifi_devices.is_empty());
+            assert!(state.current_device.is_none());
+            assert!(!state.networking_enabled);
+        }
+    }
+    reply_properties(&mut app, pending, manager_properties(&[]));
+    assert!(app.resource::<NMState>().networking_enabled);
+    assert!(app.resource::<NMState>().pending.is_empty());
+}
+
+#[test]
+fn service_absence_errors_clear_all_pending_request_kinds() {
+    for name in [
+        "org.freedesktop.DBus.Error.ServiceUnknown",
+        "org.freedesktop.DBus.Error.NameHasNoOwner",
+    ] {
+        let (mut app, _peer, path, ap) = initialized();
+        let kinds = [
+            CallType::GetAll,
+            CallType::DeviceProperties(path.clone()),
+            CallType::ActiveAccessPoint(path.clone()),
+            CallType::AccessPointProperties {
+                device_path: path.clone(),
+                access_point_path: ap.clone(),
+            },
+        ];
+        // Populate each bookkeeping variant to check that service-wide errors
+        // discard all requests, rather than just the call that failed.
+        for (index, kind) in kinds.into_iter().enumerate() {
+            app.resource_mut::<NMState>().pending.insert(
+                CallId {
+                    bus: BusId::System,
+                    serial: 10_000 + index as u32,
+                },
+                kind,
+            );
+        }
+        let failed = CallId {
+            bus: BusId::System,
+            serial: 10_002,
+        };
+        reply(
+            &mut app,
+            failed,
+            Err(CallError::Remote {
+                name: name.into(),
+                message: "service disappeared".into(),
+            }),
+        );
+        assert_initialized(&app, &path, &ap);
+        // A late snapshot must not overwrite preserved flags once untracked.
+        app.signal(MethodReply {
+            call: CallId {
+                bus: BusId::System,
+                serial: 10_000,
+            },
+            result: Ok(Message::method_return(10_000).with_body(&(PropMap::new(),))),
+        });
+        app.flush();
+        assert_initialized(&app, &path, &ap);
+    }
+}
+
+#[test]
+fn malformed_tracked_replies_preserve_existing_runtime_state() {
+    let (mut app, _peer, path, ap) = initialized();
+    let ids = subscription_ids(&app);
+    for kind in [
+        CallType::GetAll,
+        CallType::DeviceProperties(path.clone()),
+        CallType::ActiveAccessPoint(path.clone()),
+        CallType::AccessPointProperties {
+            device_path: path.clone(),
+            access_point_path: ap.clone(),
+        },
+    ] {
+        let call = CallId {
+            bus: BusId::System,
+            serial: 10_000,
+        };
+        app.resource_mut::<NMState>().pending.insert(call, kind);
+        reply(
+            &mut app,
+            call,
+            Ok(Message::method_return(call.serial).with_body(&(false,))),
+        );
+        assert_initialized(&app, &path, &ap);
+        assert_eq!(subscription_ids(&app), ids);
+    }
+}
+
+#[test]
+fn malformed_manager_and_wireless_signals_preserve_initialized_state() {
+    let (mut app, _peer, path, ap) = initialized();
+    let ids = subscription_ids(&app);
+    let state = app.resource::<NMState>();
+    let cases = [
+        (
+            state.device_added.unwrap(),
+            ObjectPath::from(NM_MAIN_OBJ),
+            NM,
+            "DeviceAdded",
+        ),
+        (
+            state.device_removed.unwrap(),
+            ObjectPath::from(NM_MAIN_OBJ),
+            NM,
+            "DeviceRemoved",
+        ),
+        (
+            state.properties_changed.unwrap(),
+            ObjectPath::from(NM_MAIN_OBJ),
+            "org.freedesktop.DBus.Properties",
+            "PropertiesChanged",
+        ),
+        (
+            state.wifi_devices[&path]
+                .wireless_properties_changed
+                .unwrap(),
+            path.clone(),
+            "org.freedesktop.DBus.Properties",
+            "PropertiesChanged",
+        ),
+    ];
+    for (id, object, interface, member) in cases {
+        app.signal(SignalReceived {
+            bus: BusId::System,
+            matches: [id].into_iter().collect(),
+            msg: Message::signal(object, interface, member)
+                .with_sender(NM)
+                .with_body(&(false,)),
+        });
+        app.flush();
+        assert_initialized(&app, &path, &ap);
+        assert_eq!(subscription_ids(&app), ids);
+    }
+}
+
+#[test]
+fn wrong_bus_is_rejected_before_any_manager_or_device_signal_handler() {
+    let (mut app, _peer, path, ap) = initialized();
+    let ids = subscription_ids(&app);
+    let state = app.resource::<NMState>();
+    let device = &state.wifi_devices[&path];
+    let cases = [
+        (
+            state.device_added.unwrap(),
+            Message::signal(NM_MAIN_OBJ, NM, "DeviceAdded")
+                .with_body(&(ObjectPath::from("/new/device"),)),
+        ),
+        (
+            state.device_removed.unwrap(),
+            Message::signal(NM_MAIN_OBJ, NM, "DeviceRemoved").with_body(&(path.clone(),)),
+        ),
+        (
+            state.properties_changed.unwrap(),
+            properties_message(
+                &ObjectPath::from(NM_MAIN_OBJ),
+                NM,
+                PropMap::from([("NetworkingEnabled".into(), Value::Bool(false))]),
+            ),
+        ),
+        (
+            device.state_changed.unwrap(),
+            Message::signal(path.clone(), NM_DEVICE, "StateChanged").with_body(&(
+                nm_device_state::DISCONNECTED,
+                nm_device_state::ACTIVE,
+                1u32,
+            )),
+        ),
+        (
+            device.wireless_properties_changed.unwrap(),
+            properties_message(
+                &path,
+                NM_WIRELESS,
+                PropMap::from([(
+                    "ActiveAccessPoint".into(),
+                    Value::ObjectPath(ObjectPath::from("/")),
+                )]),
+            ),
+        ),
+        (
+            device
+                .active_ap
+                .as_ref()
+                .unwrap()
+                .properties_changed
+                .unwrap(),
+            properties_message(&ap, NM_ACCESS_POINT, ap_properties(b"Wrong bus", 0)),
+        ),
+    ];
+    for (id, msg) in cases {
+        app.signal(SignalReceived {
+            bus: BusId::Session,
+            matches: [id].into_iter().collect(),
+            msg: msg.with_sender(NM),
+        });
+        app.flush();
+        assert_initialized(&app, &path, &ap);
+        assert_eq!(subscription_ids(&app), ids);
+    }
+}
+
+#[test]
+fn unknown_match_is_skipped_and_does_not_hide_a_later_matching_subscription() {
+    let (mut app, _peer, path, ap) = initialized();
+    // A match owned by another module is valid D-Bus bookkeeping, but unknown to NMState.
+    let foreign =
+        app.resource_mut::<DBus>()
+            .system()
+            .watch_properties(NM, ap.clone(), NM_ACCESS_POINT);
+    let id = app.resource::<NMState>().wifi_devices[&path]
+        .active_ap
+        .as_ref()
+        .unwrap()
+        .properties_changed
+        .unwrap();
+    let mut event = ap_properties_signal(&ap, foreign, ap_properties(b"Ignored", 0), &[]);
+    app.signal(event.clone());
+    app.flush();
+    assert_initialized(&app, &path, &ap);
+    event.matches.push(id);
+    app.signal(event);
+    app.flush();
+    assert_device(&app, &path, Some((&ap, b"Ignored", 0)));
+    assert_eq!(app.resource::<NMState>().subscriptions.len(), 3);
+    assert!(app.resource::<NMState>().pending.is_empty());
+    app.resource_mut::<DBus>().system().remove_match(foreign);
+}
+
+#[test]
+fn manager_partial_values_and_invalidations_update_only_valid_named_flags() {
+    let (mut app, _peer) = setup();
+    discover(&mut app, &[]);
+    let id = app.resource::<NMState>().properties_changed.unwrap();
+    for target in [
+        "NetworkingEnabled",
+        "WirelessHardwareEnabled",
+        "WirelessEnabled",
+    ] {
+        for (value, invalidated, expected) in [
+            (None, false, true),
+            (Some(Value::Str("false".into())), false, true),
+            (Some(Value::Bool(false)), false, false),
+            (None, true, false),
+            (Some(Value::Bool(true)), true, false),
+            (Some(Value::U32(1)), true, false),
+        ] {
+            let mut state = app.resource_mut::<NMState>();
+            state.networking_enabled = true;
+            state.wireless_hardware_enabled = true;
+            state.wireless_enabled = true;
+            let mut changed = PropMap::from([("Unrelated".into(), Value::Bool(false))]);
+            if let Some(value) = value {
+                changed.insert(target.into(), value);
+            }
+            app.signal(SignalReceived {
+                bus: BusId::System,
+                matches: [id].into_iter().collect(),
+                msg: Message::signal(
+                    NM_MAIN_OBJ,
+                    "org.freedesktop.DBus.Properties",
+                    "PropertiesChanged",
+                )
+                .with_sender(NM)
+                .with_body(&(
+                    NM,
+                    changed,
+                    if invalidated {
+                        vec![target.to_string(), "Unrelated".into()]
+                    } else {
+                        vec!["Unrelated".into()]
+                    },
+                )),
+            });
+            app.flush();
+            let state = app.resource::<NMState>();
+            for (name, actual) in [
+                ("NetworkingEnabled", state.networking_enabled),
+                ("WirelessHardwareEnabled", state.wireless_hardware_enabled),
+                ("WirelessEnabled", state.wireless_enabled),
+            ] {
+                assert_eq!(
+                    actual,
+                    if name == target { expected } else { true },
+                    "{name}"
+                );
+            }
+            assert!(state.pending.is_empty());
+            assert!(state.wifi_devices.is_empty());
+        }
+    }
+}
+
+#[test]
+fn routed_device_signals_with_missing_owner_do_not_recreate_the_device() {
+    for kind in 0..3 {
+        let (mut app, _peer, path, ap) = initialized();
+        let state = app.resource::<NMState>();
+        let device = &state.wifi_devices[&path];
+        let (id, subscription, msg) = match kind {
+            0 => (
+                device.state_changed.unwrap(),
+                Subscription::DeviceState(path.clone()),
+                Message::signal(path.clone(), NM_DEVICE, "StateChanged").with_body(&(
+                    nm_device_state::DISCONNECTED,
+                    nm_device_state::ACTIVE,
+                    1u32,
+                )),
+            ),
+            1 => (
+                device.wireless_properties_changed.unwrap(),
+                Subscription::WirelessProperties(path.clone()),
+                properties_message(
+                    &path,
+                    NM_WIRELESS,
+                    PropMap::from([("ActiveAccessPoint".into(), Value::ObjectPath(ap.clone()))]),
+                ),
+            ),
+            _ => (
+                device
+                    .active_ap
+                    .as_ref()
+                    .unwrap()
+                    .properties_changed
+                    .unwrap(),
+                Subscription::AccessPointProperties(path.clone()),
+                properties_message(&ap, NM_ACCESS_POINT, ap_properties(b"Stale", 99)),
+            ),
+        };
+        remove_device(&mut app, &path);
+        // Deliberately restore stale routing to reach the missing-owner guard.
+        // Ordinary removal clears this entry and exits at the routing-map lookup.
+        app.resource_mut::<NMState>()
+            .subscriptions
+            .insert(id, subscription);
+        app.signal(SignalReceived {
+            bus: BusId::System,
+            matches: [id].into_iter().collect(),
+            msg,
+        });
+        app.flush();
+        let state = app.resource::<NMState>();
+        assert!(state.wifi_devices.is_empty());
+        assert!(state.current_device.is_none());
+        assert!(state.pending.is_empty());
+        assert_eq!(state.subscriptions.len(), 1);
+        assert!(state.subscriptions.contains_key(&id));
+    }
+}
+
+#[test]
+fn routed_ap_signal_without_a_tracked_ap_is_ignored() {
+    let (mut app, _peer, path, ap) = initialized();
+    let old_ap = app
+        .resource_mut::<NMState>()
+        .wifi_devices
+        .get_mut(&path)
+        .unwrap()
+        .active_ap
+        .take()
+        .unwrap();
+    // Keep the route deliberately, otherwise only the unknown-match guard runs.
+    let ids = subscription_ids(&app);
+    app.signal(ap_properties_signal(
+        &ap,
+        old_ap.properties_changed.unwrap(),
+        ap_properties(b"Stale", 99),
+        &[],
+    ));
+    app.flush();
+    assert_device(&app, &path, None);
+    assert_eq!(subscription_ids(&app), ids);
+    assert!(app.resource::<NMState>().pending.is_empty());
+}
+
+#[test]
+fn active_ap_reply_preserves_an_already_tracked_ap_and_its_subscription() {
+    let (mut app, _peer, path, ap) = initialized();
+    let ids = subscription_ids(&app);
+    let call = CallId {
+        bus: BusId::System,
+        serial: 10_000,
+    };
+    // Bypass pending cleanup to exercise the second line of defense directly.
+    app.resource_mut::<NMState>()
+        .pending
+        .insert(call, CallType::ActiveAccessPoint(path.clone()));
+    reply(
+        &mut app,
+        call,
+        Ok(Message::method_return(call.serial)
+            .with_body(&(Value::ObjectPath(ObjectPath::from("/obsolete/ap")),))),
+    );
+    assert_initialized(&app, &path, &ap);
+    assert_eq!(subscription_ids(&app), ids);
+}
+
+#[test]
+fn active_ap_reply_for_a_missing_device_does_not_leave_local_tracking() {
+    let (mut app, _peer, path, ap) = initialized();
+    remove_device(&mut app, &path);
+    let call = CallId {
+        bus: BusId::System,
+        serial: 10_000,
+    };
+    app.resource_mut::<NMState>()
+        .pending
+        .insert(call, CallType::ActiveAccessPoint(path));
+    reply(
+        &mut app,
+        call,
+        Ok(Message::method_return(call.serial).with_body(&(Value::ObjectPath(ap),))),
+    );
+    let state = app.resource::<NMState>();
+    assert!(state.wifi_devices.is_empty());
+    assert!(state.current_device.is_none());
+    assert!(state.pending.is_empty());
+    assert!(state.subscriptions.is_empty());
+}
+
+#[test]
+fn ap_property_reply_requires_both_a_device_and_a_matching_tracked_ap() {
+    for case in 0..3 {
+        let (mut app, _peer, path, ap) = initialized();
+        let reply_path = if case == 2 {
+            ObjectPath::from("/obsolete/ap")
+        } else {
+            ap.clone()
+        };
+        match case {
+            0 => remove_device(&mut app, &path),
+            1 => wireless_change(
+                &mut app,
+                &path,
+                PropMap::from([(
+                    "ActiveAccessPoint".into(),
+                    Value::ObjectPath(ObjectPath::from("/")),
+                )]),
+                &[],
+            ),
+            _ => {}
+        }
+        let ids = subscription_ids(&app);
+        let call = CallId {
+            bus: BusId::System,
+            serial: 10_000,
+        };
+        // Real cleanup removes the pending entry. Restore it to reach each of
+        // the reply handler's device/AP/path guards independently.
+        app.resource_mut::<NMState>().pending.insert(
+            call,
+            CallType::AccessPointProperties {
+                device_path: path.clone(),
+                access_point_path: reply_path,
+            },
+        );
+        reply_properties(&mut app, call, ap_properties(b"Stale", 99));
+        assert_eq!(subscription_ids(&app), ids);
+        assert!(app.resource::<NMState>().pending.is_empty());
+        match case {
+            0 => assert!(app.resource::<NMState>().wifi_devices.is_empty()),
+            1 => assert_device(&app, &path, None),
+            _ => assert_initialized(&app, &path, &ap),
+        }
     }
 }
