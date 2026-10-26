@@ -204,6 +204,61 @@ fn wireless_change(app: &mut App, path: &ObjectPath, changed: PropMap, invalidat
     app.flush();
 }
 
+fn ap_properties(ssid: &[u8], strength: u8) -> PropMap {
+    PropMap::from([
+        ("Ssid".into(), ssid_value(ssid)),
+        ("Strength".into(), Value::U8(strength)),
+    ])
+}
+
+fn initialize_ap(app: &mut App, device: &ObjectPath, ap: &ObjectPath, ssid: &[u8], strength: u8) {
+    read_active_ap(app, device, ap);
+    let call = ap_properties_call(app, device, ap);
+    reply_properties(app, call, ap_properties(ssid, strength));
+    assert_device(app, device, Some((ap, ssid, strength)));
+}
+
+fn ap_properties_signal(
+    path: &ObjectPath,
+    id: MatchId,
+    changed: PropMap,
+    invalidated: &[&str],
+) -> SignalReceived {
+    SignalReceived {
+        bus: BusId::System,
+        matches: [id].into_iter().collect(),
+        msg: Message::signal(
+            path.clone(),
+            "org.freedesktop.DBus.Properties",
+            "PropertiesChanged",
+        )
+        .with_sender(NM)
+        .with_body(&(
+            NM_ACCESS_POINT,
+            changed,
+            invalidated
+                .iter()
+                .map(|name| name.to_string())
+                .collect::<Vec<_>>(),
+        )),
+    }
+}
+
+fn ap_change(app: &mut App, device: &ObjectPath, changed: PropMap, invalidated: &[&str]) {
+    let ap = app.resource::<NMState>().wifi_devices[device]
+        .active_ap
+        .as_ref()
+        .unwrap();
+    let event = ap_properties_signal(
+        &ap.path,
+        ap.properties_changed.unwrap(),
+        changed,
+        invalidated,
+    );
+    app.signal(event);
+    app.flush();
+}
+
 fn assert_device(app: &App, path: &ObjectPath, ap: Option<(&ObjectPath, &[u8], u8)>) {
     let state = app.resource::<NMState>();
     let device = state.wifi_devices.get(path).expect("missing Wi-Fi device");
@@ -851,6 +906,385 @@ fn wireless_ap_signal_initializes_before_activation_and_supersedes_initial_read(
         assert_device(&app, &path, Some((&ap, b"Office", 80)));
         assert!(app.resource::<NMState>().pending.is_empty());
     }
+}
+
+#[test]
+fn ap_property_changes_decode_fields_independently_and_preserve_raw_ssid() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/10");
+    let ssid_cases = [
+        (None, b"Office".as_slice()),
+        (
+            Some(ssid_value(b"Raw\xff\0SSID")),
+            b"Raw\xff\0SSID".as_slice(),
+        ),
+        (Some(ssid_value(b"")), b"".as_slice()),
+        (Some(Value::Str("not bytes".into())), b"Office".as_slice()),
+        (
+            Some(Value::Array {
+                elem: "u".into(),
+                items: vec![Value::U32(65)],
+            }),
+            b"Office".as_slice(),
+        ),
+    ];
+    let strength_cases = [
+        (None, 70),
+        (Some(Value::U8(0)), 0),
+        (Some(Value::U8(100)), 100),
+        (Some(Value::U32(80)), 70),
+        (Some(Value::Bool(true)), 70),
+    ];
+    for (ssid, expected_ssid) in ssid_cases {
+        for (strength, expected_strength) in strength_cases.clone() {
+            let (mut app, _peer) = setup();
+            connected_device(&mut app, &path);
+            initialize_ap(&mut app, &path, &ap, b"Office", 70);
+            let mut changed = PropMap::new();
+            if let Some(value) = ssid.clone() {
+                changed.insert("Ssid".into(), value);
+            }
+            if let Some(value) = strength {
+                changed.insert("Strength".into(), value);
+            }
+            ap_change(&mut app, &path, changed, &[]);
+            assert_device(&app, &path, Some((&ap, expected_ssid, expected_strength)));
+            assert!(app.resource::<NMState>().pending.is_empty());
+            assert_eq!(app.resource::<NMState>().subscriptions.len(), 3);
+        }
+    }
+}
+
+#[test]
+fn ap_property_invalidations_reset_only_named_fields_and_override_supplied_values() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/10");
+    for invalidate_ssid in [false, true] {
+        for invalidate_strength in [false, true] {
+            for (changed, supplied_ssid, supplied_strength) in [
+                (PropMap::new(), b"Office".as_slice(), 70),
+                (ap_properties(b"New", 90), b"New".as_slice(), 90),
+                (
+                    PropMap::from([
+                        ("Ssid".into(), Value::Bool(false)),
+                        ("Strength".into(), Value::Str("invalid".into())),
+                    ]),
+                    b"Office".as_slice(),
+                    70,
+                ),
+            ] {
+                let (mut app, _peer) = setup();
+                connected_device(&mut app, &path);
+                initialize_ap(&mut app, &path, &ap, b"Office", 70);
+                let mut invalidated = vec!["Frequency"];
+                if invalidate_ssid {
+                    invalidated.push("Ssid");
+                }
+                if invalidate_strength {
+                    invalidated.push("Strength");
+                }
+                ap_change(&mut app, &path, changed, &invalidated);
+                assert_device(
+                    &app,
+                    &path,
+                    Some((
+                        &ap,
+                        if invalidate_ssid { b"" } else { supplied_ssid },
+                        if invalidate_strength {
+                            0
+                        } else {
+                            supplied_strength
+                        },
+                    )),
+                );
+                assert!(app.resource::<NMState>().pending.is_empty());
+                assert_eq!(app.resource::<NMState>().subscriptions.len(), 3);
+
+                // Invalidations clear values, not the AP or its subscription.
+                ap_change(&mut app, &path, ap_properties(b"Recovered", 42), &[]);
+                assert_device(&app, &path, Some((&ap, b"Recovered", 42)));
+            }
+        }
+    }
+}
+
+#[test]
+fn repeated_and_unrelated_ap_changes_preserve_tracking_and_selection() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/10");
+    let (mut app, _peer) = setup();
+    connected_device(&mut app, &path);
+    initialize_ap(&mut app, &path, &ap, b"Office", 70);
+    let id = app.resource::<NMState>().wifi_devices[&path]
+        .active_ap
+        .as_ref()
+        .unwrap()
+        .properties_changed;
+    for _ in 0..2 {
+        for changed in [
+            PropMap::new(),
+            ap_properties(b"Office", 70),
+            PropMap::from([
+                ("Frequency".into(), Value::U32(5180)),
+                ("SSID".into(), ssid_value(b"Wrong case")),
+                ("strength".into(), Value::U8(1)),
+            ]),
+        ] {
+            ap_change(&mut app, &path, changed, &["Frequency", "SSID", "strength"]);
+            assert_device(&app, &path, Some((&ap, b"Office", 70)));
+            let state = app.resource::<NMState>();
+            assert_eq!(
+                state.wifi_devices[&path]
+                    .active_ap
+                    .as_ref()
+                    .unwrap()
+                    .properties_changed,
+                id
+            );
+            assert_eq!(state.wifi_devices[&path].state, nm_device_state::ACTIVE);
+            assert_eq!(state.current_device.as_ref(), Some(&path));
+            assert_eq!(state.subscriptions.len(), 3);
+            assert!(state.pending.is_empty());
+        }
+    }
+}
+
+#[test]
+fn malformed_wrong_bus_and_unmatched_ap_signals_preserve_cached_values() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/10");
+    let (mut app, _peer) = setup();
+    connected_device(&mut app, &path);
+    initialize_ap(&mut app, &path, &ap, b"Office", 70);
+    let id = app.resource::<NMState>().wifi_devices[&path]
+        .active_ap
+        .as_ref()
+        .unwrap()
+        .properties_changed
+        .unwrap();
+    let signal = || {
+        Message::signal(
+            ap.clone(),
+            "org.freedesktop.DBus.Properties",
+            "PropertiesChanged",
+        )
+        .with_sender(NM)
+    };
+    for msg in [
+        signal().with_body(&(false,)),
+        signal().with_body(&(NM_ACCESS_POINT, ap_properties(b"Ignored", 1))),
+        signal().with_body(&(NM_ACCESS_POINT, ap_properties(b"Ignored", 1), true)),
+    ] {
+        app.signal(SignalReceived {
+            bus: BusId::System,
+            matches: [id].into_iter().collect(),
+            msg,
+        });
+        app.flush();
+        assert_device(&app, &path, Some((&ap, b"Office", 70)));
+    }
+    let mut wrong_bus =
+        ap_properties_signal(&ap, id, ap_properties(b"Ignored", 1), &["Ssid", "Strength"]);
+    wrong_bus.bus = BusId::Session;
+    app.signal(wrong_bus);
+    app.flush();
+    assert_device(&app, &path, Some((&ap, b"Office", 70)));
+
+    let mut unmatched =
+        ap_properties_signal(&ap, id, ap_properties(b"Ignored", 1), &["Ssid", "Strength"]);
+    unmatched.matches.clear();
+    app.signal(unmatched);
+    app.flush();
+    assert_device(&app, &path, Some((&ap, b"Office", 70)));
+    assert!(app.resource::<NMState>().pending.is_empty());
+    assert_eq!(app.resource::<NMState>().subscriptions.len(), 3);
+}
+
+#[test]
+fn ap_changes_are_device_local_even_with_matching_ssids_and_different_states() {
+    let selected = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let other = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");
+    let selected_ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/10");
+    let other_ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/20");
+    let (mut app, _peer) = setup();
+    discover(&mut app, &[selected.clone(), other.clone()]);
+    for (device, ap, strength) in [(&selected, &selected_ap, 70), (&other, &other_ap, 20)] {
+        let call = device_call(&app, device);
+        reply_properties(
+            &mut app,
+            call,
+            device_properties(nm_device_type::WIFI, nm_device_state::ACTIVE),
+        );
+        initialize_ap(&mut app, device, ap, b"Shared SSID", strength);
+    }
+    let state_match = app.resource::<NMState>().wifi_devices[&other]
+        .state_changed
+        .unwrap();
+    app.signal(state_changed_signal(
+        &other,
+        state_match,
+        nm_device_state::DEACTIVATING,
+        nm_device_state::ACTIVE,
+    ));
+    app.flush();
+    ap_change(
+        &mut app,
+        &other,
+        PropMap::from([("Strength".into(), Value::U8(35))]),
+        &[],
+    );
+    assert_device(&app, &selected, Some((&selected_ap, b"Shared SSID", 70)));
+    assert_device(&app, &other, Some((&other_ap, b"Shared SSID", 35)));
+
+    ap_change(
+        &mut app,
+        &selected,
+        PropMap::from([("Ssid".into(), ssid_value(b"Renamed"))]),
+        &["Strength"],
+    );
+    assert_device(&app, &selected, Some((&selected_ap, b"Renamed", 0)));
+    assert_device(&app, &other, Some((&other_ap, b"Shared SSID", 35)));
+    let state = app.resource::<NMState>();
+    assert_eq!(state.current_device.as_ref(), Some(&selected));
+    assert_eq!(state.wifi_devices[&selected].state, nm_device_state::ACTIVE);
+    assert_eq!(
+        state.wifi_devices[&other].state,
+        nm_device_state::DEACTIVATING
+    );
+    assert_eq!(state.subscriptions.len(), 6);
+    assert!(state.pending.is_empty());
+}
+
+#[test]
+fn obsolete_ap_signals_are_ignored_after_roaming_clearing_reconnection_and_removal() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let old_ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/10");
+    let new_ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/20");
+    let (mut app, _peer) = setup();
+    connected_device(&mut app, &path);
+    initialize_ap(&mut app, &path, &old_ap, b"Old", 70);
+    let old_id = app.resource::<NMState>().wifi_devices[&path]
+        .active_ap
+        .as_ref()
+        .unwrap()
+        .properties_changed
+        .unwrap();
+    wireless_change(
+        &mut app,
+        &path,
+        PropMap::from([(
+            "ActiveAccessPoint".into(),
+            Value::ObjectPath(new_ap.clone()),
+        )]),
+        &[],
+    );
+    let call = ap_properties_call(&app, &path, &new_ap);
+    reply_properties(&mut app, call, ap_properties(b"New", 60));
+    let new_id = app.resource::<NMState>().wifi_devices[&path]
+        .active_ap
+        .as_ref()
+        .unwrap()
+        .properties_changed
+        .unwrap();
+    assert_ne!(old_id, new_id);
+    app.signal(ap_properties_signal(
+        &old_ap,
+        old_id,
+        ap_properties(b"Obsolete", 99),
+        &["Ssid", "Strength"],
+    ));
+    app.flush();
+    assert_device(&app, &path, Some((&new_ap, b"New", 60)));
+
+    wireless_change(
+        &mut app,
+        &path,
+        PropMap::from([(
+            "ActiveAccessPoint".into(),
+            Value::ObjectPath(ObjectPath::from("/")),
+        )]),
+        &[],
+    );
+    app.signal(ap_properties_signal(
+        &new_ap,
+        new_id,
+        ap_properties(b"Obsolete", 99),
+        &[],
+    ));
+    app.flush();
+    assert_device(&app, &path, None);
+    assert_eq!(app.resource::<NMState>().subscriptions.len(), 2);
+
+    // Reusing an AP path must not revive the old subscription's queued signals.
+    wireless_change(
+        &mut app,
+        &path,
+        PropMap::from([(
+            "ActiveAccessPoint".into(),
+            Value::ObjectPath(new_ap.clone()),
+        )]),
+        &[],
+    );
+    let call = ap_properties_call(&app, &path, &new_ap);
+    reply_properties(&mut app, call, ap_properties(b"Reconnected", 55));
+    let current_id = app.resource::<NMState>().wifi_devices[&path]
+        .active_ap
+        .as_ref()
+        .unwrap()
+        .properties_changed
+        .unwrap();
+    assert_ne!(current_id, new_id);
+    app.signal(ap_properties_signal(
+        &new_ap,
+        new_id,
+        ap_properties(b"Obsolete", 99),
+        &[],
+    ));
+    app.flush();
+    assert_device(&app, &path, Some((&new_ap, b"Reconnected", 55)));
+    ap_change(
+        &mut app,
+        &path,
+        PropMap::from([("Strength".into(), Value::U8(56))]),
+        &[],
+    );
+    assert_device(&app, &path, Some((&new_ap, b"Reconnected", 56)));
+
+    remove_device(&mut app, &path);
+    app.signal(ap_properties_signal(
+        &new_ap,
+        current_id,
+        ap_properties(b"Obsolete", 99),
+        &[],
+    ));
+    app.flush();
+    let state = app.resource::<NMState>();
+    assert!(state.wifi_devices.is_empty());
+    assert!(state.current_device.is_none());
+    assert!(state.subscriptions.is_empty());
+    assert!(state.pending.is_empty());
+}
+
+#[test]
+fn ap_signals_work_while_initial_properties_are_pending_and_after_read_failure() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/10");
+    let (mut app, _peer) = setup();
+    connected_device(&mut app, &path);
+    read_active_ap(&mut app, &path, &ap);
+    let call = ap_properties_call(&app, &path, &ap);
+    ap_change(&mut app, &path, ap_properties(b"Live", 64), &[]);
+    assert_device(&app, &path, Some((&ap, b"Live", 64)));
+    assert!(app.resource::<NMState>().pending.contains_key(&call));
+    reply(&mut app, call, Err(CallError::Timeout));
+    assert_device(&app, &path, Some((&ap, b"Live", 64)));
+
+    ap_change(&mut app, &path, PropMap::new(), &["Ssid", "Strength"]);
+    assert_device(&app, &path, Some((&ap, b"", 0)));
+    ap_change(&mut app, &path, ap_properties(b"Recovered", 81), &[]);
+    assert_device(&app, &path, Some((&ap, b"Recovered", 81)));
+    assert_eq!(app.resource::<NMState>().subscriptions.len(), 3);
+    assert!(app.resource::<NMState>().pending.is_empty());
 }
 
 #[test]
