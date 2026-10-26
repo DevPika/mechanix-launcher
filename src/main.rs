@@ -1,3 +1,4 @@
+use mecha_wayland::mechanix_widgets::prelude::FontBook;
 use mecha_wayland::prelude::*;
 
 mod bottom_bar;
@@ -74,8 +75,9 @@ fn main() {
         .add_module(WindowModule)
         .add_module(MechanixTheme::dark())
         .add_module(InteractivityModule)
-        .add_module(RenderModule::default())
-        .insert_resource(atlas);
+        .add_module(RenderModule::default());
+    app.insert_resource(atlas);
+    app.insert_resource(FontBook::new(font));
     app.add_module(RingModule::default())
         .add_module(DBusModule::new().system())
         .add_module(UpowerModule)
@@ -99,8 +101,8 @@ fn main() {
         root,
         ShellBuilder {
             root,
-            header: HeaderBuilder { font },
-            bottom_bar: BottomBarBuilder { font },
+            header: HeaderBuilder,
+            bottom_bar: BottomBarBuilder,
             sliders: SlidersBuilder,
         },
     );

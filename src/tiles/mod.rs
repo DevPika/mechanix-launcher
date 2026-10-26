@@ -1,3 +1,4 @@
+use mecha_wayland::mechanix_widgets::prelude::{Text, text};
 use mecha_wayland::prelude::*;
 
 use crate::util::load_icon;
@@ -59,14 +60,13 @@ pub(super) fn build_tile<W: Widget>(
 pub(super) fn build_label<W: Widget>(
     me: Handle<W>,
     s: &mut Spawner<'_, W>,
-    font: FontId,
     value: impl Into<String>,
 ) -> Handle<Text> {
     s.spawn(
         me,
-        text(font, value)
-            .size(18)
+        text(value)
+            .size(18.0)
             .style(LayoutStyle::default().shrink(0.0))
-            .color(s.color(ColorRole::OnSurfaceVariant)),
+            .color(ColorRole::OnSurfaceVariant),
     )
 }

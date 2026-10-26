@@ -1,3 +1,4 @@
+use mecha_wayland::mechanix_widgets::prelude::{ButtonVariant, button, text};
 use mecha_wayland::prelude::*;
 
 use crate::util::full_width;
@@ -8,13 +9,11 @@ mod svg {
 
 pub const HEADER_HEIGHT: f32 = 80.0;
 const DATE: &str = "Today,19 Oct";
-const POWER_ICON_SIZE: u32 = 26;
+const POWER_ICON_SIZE: u32 = 20;
 
 pub struct Header;
 
-pub struct HeaderBuilder {
-    pub font: FontId,
-}
+pub struct HeaderBuilder;
 
 impl Build for HeaderBuilder {
     type Widget = Header;
@@ -23,18 +22,18 @@ impl Build for HeaderBuilder {
 impl Widget for Header {
     type Builder = HeaderBuilder;
 
-    fn build(b: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
+    fn build(_: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
         *s.component_mut::<LayoutStyle>(me).unwrap() = full_width(HEADER_HEIGHT)
             .row()
             .align_items(Align::Center)
             .justify(Justify::SpaceBetween)
-            .padding(Insets::new(px(0.0), percent(4.0), px(0.0), percent(4.0)));
+            .padding(Insets::new(px(0.0), px(20.0), px(0.0), px(20.0)));
 
         s.spawn(
             me,
-            text(b.font, DATE)
-                .size(24)
-                .color(s.color(ColorRole::OnSurfaceVariant)),
+            text(DATE)
+                .variant(TextVariant::TitleSmall)
+                .color(ColorRole::OnSurfaceVariant),
         );
 
         let bitmap = Bitmap::from_svg(svg::POWER, POWER_ICON_SIZE)
@@ -44,23 +43,17 @@ impl Widget for Header {
             .insert(Class::Icon, &bitmap)
             .expect("power icon should fit in the atlas");
 
-        let power = s.spawn(
-            me,
-            button().style(
-                LayoutStyle::default()
-                    .height(px(44.0))
-                    .row()
-                    .center()
-                    .gap(px(8.0))
-                    .shrink(0.0),
-            ),
-        );
-        s.spawn(power, icon(sprite).color(s.color(ColorRole::OnSurface)));
         s.spawn(
-            power,
-            text(b.font, "POWER")
-                .size(20)
-                .color(s.color(ColorRole::OnSurface)),
+            me,
+            button()
+                .variant(ButtonVariant::Text)
+                .icon(sprite)
+                .label("POWER")
+                .icon_gap(px(10.0))
+                .hover_background(Color::TRANSPARENT)
+                .pressed_background(Color::TRANSPARENT)
+                .height(px(32.))
+                .text_color(ColorRole::OnSurface),
         );
 
         Header

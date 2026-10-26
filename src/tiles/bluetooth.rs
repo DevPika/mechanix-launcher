@@ -1,3 +1,4 @@
+use mecha_wayland::mechanix_widgets::prelude::{Text, TextContextExt};
 use mecha_wayland::prelude::*;
 
 use super::{build_label, build_tile};
@@ -21,9 +22,7 @@ pub struct Bluetooth {
     pub icon_connected: SpriteId,
 }
 
-pub struct BluetoothBuilder {
-    pub font: FontId,
-}
+pub struct BluetoothBuilder;
 
 impl Build for BluetoothBuilder {
     type Widget = Bluetooth;
@@ -32,13 +31,13 @@ impl Build for BluetoothBuilder {
 impl Widget for Bluetooth {
     type Builder = BluetoothBuilder;
 
-    fn build(b: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
+    fn build(_: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
         let icon_on = load_icon(&mut s.resource_mut::<Atlas>(), svg::ON);
         let icon_off = load_icon(&mut s.resource_mut::<Atlas>(), svg::SLASH);
         let icon_connected = load_icon(&mut s.resource_mut::<Atlas>(), svg::CONNECTED);
 
         let icon = build_tile(me, s, svg::SLASH);
-        let name = build_label(me, s, b.font, "Off");
+        let name = build_label(me, s, "Off");
         let dot = s.spawn(
             me,
             div().style(

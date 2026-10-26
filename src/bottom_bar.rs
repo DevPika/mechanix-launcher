@@ -9,9 +9,7 @@ const BOTTOM_BAR_HEIGHT: f32 = TILE_HEIGHT * 2.0;
 
 pub struct BottomBar;
 
-pub struct BottomBarBuilder {
-    pub font: FontId,
-}
+pub struct BottomBarBuilder;
 
 impl Build for BottomBarBuilder {
     type Widget = BottomBar;
@@ -20,7 +18,7 @@ impl Build for BottomBarBuilder {
 impl Widget for BottomBar {
     type Builder = BottomBarBuilder;
 
-    fn build(b: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
+    fn build(_: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
         *s.component_mut::<LayoutStyle>(me).unwrap() = LayoutStyle::default()
             .height(px(BOTTOM_BAR_HEIGHT))
             .column()
@@ -34,11 +32,10 @@ impl Widget for BottomBar {
         s.spawn(
             top,
             WifiBuilder {
-                font: b.font,
                 name: "Office 01".into(),
             },
         );
-        s.spawn(top, BluetoothBuilder { font: b.font });
+        s.spawn(top, BluetoothBuilder);
         s.spawn(top, DisplayTileBuilder);
         s.spawn(top, TerminalBuilder);
         s.spawn(top, MicrophoneBuilder);
@@ -48,7 +45,7 @@ impl Widget for BottomBar {
         s.spawn(bottom, SettingsBuilder);
         s.spawn(bottom, CameraBuilder);
         s.spawn(bottom, RotateBuilder);
-        s.spawn(bottom, BatteryBuilder { font: b.font });
+        s.spawn(bottom, BatteryBuilder);
 
         BottomBar
     }
@@ -59,19 +56,22 @@ mod tests {
     use super::*;
     use crate::services::{BatteryPercentageChanged, BluetoothState, BluetoothStateChanged};
     use crate::tiles::{Battery, Bluetooth};
+    use mecha_wayland::mechanix_widgets::NativeText;
+    use mecha_wayland::mechanix_widgets::prelude::{FontBook, Text};
 
     #[test]
     fn battery_service_updates_bottom_bar_label() {
         let mut app = App::new();
         app.add_module(LayoutModule)
             .add_module(PaintModule)
-            .add_module(MechanixTheme::dark())
-            .insert_resource(Atlas::new());
-        let font = app
-            .resource_mut::<Atlas>()
+            .add_module(MechanixTheme::dark());
+        let mut atlas = Atlas::new();
+        let font = atlas
             .add_font(include_bytes!("../assets/fonts/GeistMono-Regular.ttf"))
             .unwrap();
-        app.spawn(app.root(), BottomBarBuilder { font });
+        app.insert_resource(atlas);
+        app.insert_resource(FontBook::new(font));
+        app.spawn(app.root(), BottomBarBuilder);
         app.tick();
 
         let (_, battery) = app.widgets::<Battery>().next().unwrap();
@@ -82,7 +82,8 @@ mod tests {
                 app.descendants(app.root()).collect::<Vec<_>>(),
             );
             app.tick();
-            assert_eq!(app.widget::<Text>(percentage).unwrap().string, label);
+            let native = app.widget::<Text>(percentage).unwrap().native();
+            assert_eq!(app.widget::<NativeText>(native).unwrap().string, label);
         }
     }
 
@@ -91,13 +92,14 @@ mod tests {
         let mut app = App::new();
         app.add_module(LayoutModule)
             .add_module(PaintModule)
-            .add_module(MechanixTheme::dark())
-            .insert_resource(Atlas::new());
-        let font = app
-            .resource_mut::<Atlas>()
+            .add_module(MechanixTheme::dark());
+        let mut atlas = Atlas::new();
+        let font = atlas
             .add_font(include_bytes!("../assets/fonts/GeistMono-Regular.ttf"))
             .unwrap();
-        app.spawn(app.root(), BottomBarBuilder { font });
+        app.insert_resource(atlas);
+        app.insert_resource(FontBook::new(font));
+        app.spawn(app.root(), BottomBarBuilder);
         app.tick();
 
         let (_, bluetooth) = app.widgets::<Bluetooth>().next().unwrap();
@@ -115,7 +117,8 @@ mod tests {
                 app.descendants(app.root()).collect::<Vec<_>>(),
             );
             app.tick();
-            assert_eq!(app.widget::<Text>(text_handle).unwrap().string, label);
+            let native = app.widget::<Text>(text_handle).unwrap().native();
+            assert_eq!(app.widget::<NativeText>(native).unwrap().string, label);
             let dot_paint = app.component::<Paint>(dot_handle.id()).unwrap();
             if is_on {
                 assert!(matches!(dot_paint, Paint::Quad(_)));
