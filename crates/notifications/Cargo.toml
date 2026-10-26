@@ -4,4 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-mecha-wayland = { version = "0.1.0", path = "../.." }
+mecha-wayland.workspace = true
+screen.workspace = true

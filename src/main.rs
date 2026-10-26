@@ -7,7 +7,7 @@ use nav::core::{
     container, swipe,
 };
 use nav::shell::{NavModule, nav_window};
-use notifications::Notifications;
+use notifications::{Notifications, NotificationsModule};
 use quick_settings::QuickSettings;
 use running_apps::RunningApps;
 use search::Search;
@@ -154,7 +154,7 @@ fn main() {
     app.insert_resource(icons);
 
     app.add_module(RingModule::default())
-        .add_module(DBusModule::new().system())
+        .add_module(DBusModule::new().system().session())
         .add_module(
             WaylandModule::new()
                 .bind::<WlCompositor>()
@@ -169,7 +169,8 @@ fn main() {
         });
 
     app.add_module(navigation(NavConfig::default()))
-        .add_module(StatusBarModule);
+        .add_module(StatusBarModule)
+        .add_module(NotificationsModule);
 
     app.run();
 }

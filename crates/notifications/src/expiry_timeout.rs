@@ -1,5 +1,5 @@
 use crate::{
-    NotificationStore, dbus_spec::NOTIFICATIONS_EXPIRY,
+    dbus_spec::NOTIFICATIONS_EXPIRY, notification_store::NotificationStore,
     notify_signal::NotificationSignal::RemoveNotification,
 };
 use mecha_wayland::prelude::{App, IoEvent, Resource, Ring, Token};
