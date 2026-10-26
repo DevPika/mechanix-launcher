@@ -1,5 +1,6 @@
 use app_drawer::AppDrawer;
 use home::Home;
+use keyboard::KeyboardModule;
 use mecha_wayland::mechanix_widgets::prelude::FontBook;
 use mecha_wayland::prelude::*;
 use nav::core::{
@@ -169,7 +170,8 @@ fn main() {
         });
 
     app.add_module(navigation(NavConfig::default()))
-        .add_module(StatusBarModule);
+        .add_module(StatusBarModule)
+        .add_module(KeyboardModule);
 
     app.run();
 }

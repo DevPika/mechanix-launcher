@@ -1,38 +1,14 @@
-//! mechanix-keyboard — an on-screen keyboard built with themed widgets on the
-//! mecha-wayland UI core.
-//!
-//! Builds a tree of themed `Widget` nodes: each key is a `Key` widget whose
-//! background, label colour, and corner radius come from `MechanixTheme` /
-//! `ColorRole`, and whose `on_theme` callback re-resolves them instantly when
-//! the user toggles dark/light at runtime.
-//!
-//! The keymap (parsed from `resources/layout.yaml` by `layout.rs`) drives which
-//! keys appear and what they do. View switching (Shift_L `locking`,
-//! `show_symbols`, `show_eschars`) and one-shot modifier latching (Ctrl, Alt) are
-//! supported. Text keys commit through `zwp_input_method_v2` when a text input
-//! is focused, falling back to `zwp_virtual_keyboard_v1` keysym transport.
-
-#![recursion_limit = "1024"]
-
 use std::collections::HashSet;
 
 use mecha_wayland::prelude::*;
 
-mod color_role;
-mod font;
-mod icons;
-mod input_method;
-mod key_style;
-mod layout;
-mod shape;
-mod spacing;
-mod virtual_keyboard;
-
+use crate::font::Fonts;
 use crate::icons::Icons;
-use font::Fonts;
-use input_method::{ApplyKeyboardVisibility, KeyboardVisibilityExt, TextInputFocused};
-use key_style::{KeyLook, KeyState};
-use layout::{KeyAction, KeyFace, Keymap, Modifier};
+use crate::input_method::TextInputFocused;
+use crate::key_style::{KeyLook, KeyState};
+use crate::layout::{self, KeyAction, KeyFace, Keymap, Modifier};
+use crate::{input_method, virtual_keyboard};
+
 /// The default view: shown when the keyboard first appears and for text
 /// fields with no more specific purpose. Must exist in `layout.yaml`.
 const BASE_VIEW: &str = "base";
@@ -50,18 +26,11 @@ fn view_for_purpose(purpose: ZwpTextInputV3ContentPurpose) -> &'static str {
     }
 }
 
-/// The debug visibility bar's height — also the collapsed surface height.
-///
-/// The layer surface is created at this height (keyboard hidden at launch,
-/// no text input focused) and grows to the keymap's `keyboard.height` once a
-/// text input activates or the bar is tapped.
-const BAR_HEIGHT: f32 = 8.0;
-
 /// Shared state for the one-shot modifier latches. Stored as a `Resource` so
 /// both the Key widget's `on_theme` handler and the Keyboard's `dispatch`
 /// function can read/write it.
 #[derive(Default)]
-struct LatchedState {
+pub(crate) struct LatchedState {
     armed: HashSet<Modifier>,
 }
 impl Resource for LatchedState {}
@@ -242,7 +211,7 @@ impl Widget for Key {
 /// and spawns themed `Key` widgets from the parsed keymap. All views are
 /// spawned at build time; non-current views are `Display::Hidden` and toggled
 /// visible on view-switch key taps.
-struct Keyboard {
+pub(crate) struct Keyboard {
     /// Every view, in keymap order.
     views: Vec<ViewNode>,
     /// Index into `views` of the view currently shown.
@@ -281,15 +250,15 @@ impl Event for SwitchView {}
 
 /// System: a text field gained focus or changed purpose — show the view for
 /// its purpose.
-fn on_text_input_focused(app: &mut App, focused: &TextInputFocused) {
+pub(crate) fn on_text_input_focused(app: &mut App, focused: &TextInputFocused) {
     let view = view_for_purpose(focused.purpose);
     let targets: Vec<NodeId> = app.widgets::<Keyboard>().map(|(id, _)| id).collect();
     app.emit(SwitchView { view }, targets);
 }
 
-struct KeyboardBuilder {
-    fonts: Fonts,
-    keymap: Keymap,
+pub(crate) struct KeyboardBuilder {
+    pub(crate) fonts: Fonts,
+    pub(crate) keymap: Keymap,
 }
 
 impl Build for KeyboardBuilder {
@@ -584,211 +553,6 @@ fn repaint_latch_keys(ctx: &mut Context<'_, Keyboard>) {
         key.set_paint(Paint::Quad(Quad::new(bg).radius(radius)));
         set_label_color(ctx, label, fg);
     }
-}
-
-// ── Shell widget (layer-shell window) ─────────────────────────────────────
-
-/// Spawns a `zwlr_layer_surface` anchored to the bottom edge of the output.
-/// When no fixed width is configured it is stretched full-width (left + right
-/// anchors); otherwise it is anchored to the bottom only at the configured
-/// width. An exclusive zone of `-1` lets the surface overlap other content
-/// without reserving compositor space. `KeyboardInteractivity::None` keeps the
-/// OSK from stealing keyboard focus from the focused app; pointer taps on the
-/// layer surface are still delivered.
-struct Shell;
-
-struct ShellBuilder {
-    root: NodeId,
-    fonts: Fonts,
-    keymap: Keymap,
-}
-
-impl Build for ShellBuilder {
-    type Widget = Shell;
-}
-
-impl Widget for Shell {
-    type Builder = ShellBuilder;
-    fn build(b: ShellBuilder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-        let style = b.keymap.keyboard;
-        let kb_height = style.height;
-        let (anchor, width) = match style.width {
-            Some(w) => (Anchor::BOTTOM, px(w)),
-            _ => (Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT, auto()),
-        };
-        let role = Role::Layer(LayerRole {
-            layer: Layer::Top,
-            anchor,
-            exclusive_zone: -1,
-            namespace: "mechanix-keyboard".into(),
-            keyboard_interactivity: KeyboardInteractivity::None,
-        });
-
-        // Window column. The window's requested height starts at the bar
-        // height (8px) so the layer surface is created collapsed — the
-        // keyboard starts hidden (no text input is focused at launch) and
-        // only the bar is on screen. The visibility handler re-sends
-        // `set_size` to grow the surface to the keyboard height on show
-        // and shrink it back to the bar height on hide, so no empty black
-        // rectangle remains behind the bar when hidden.
-        //
-        // The surface height is otherwise compositor-driven (WSI → layout):
-        // `request_layer_size` asks the compositor for a new size, it
-        // configures, and `settle` reports `Resized` so the window's
-        // `LayoutStyle` is settled by the compositor answer.
-        let win = s.spawn_with(
-            b.root,
-            window().layout(
-                LayoutStyle::default()
-                    .column()
-                    .justify(Justify::End)
-                    .size(width, px(BAR_HEIGHT)),
-            ),
-            (role,),
-        );
-        let win_id = win.id();
-        // Width to (re-)request on resize: `0` only stretches full-width
-        // when left+right anchors are set; a fixed-width keyboard must
-        // echo its configured width, since it is anchored to `BOTTOM` only.
-        let req_w = match style.width {
-            Some(w) => w as u32,
-            None => 0,
-        };
-
-        let keyboard = s.spawn(
-            win,
-            KeyboardBuilder {
-                fonts: b.fonts,
-                keymap: b.keymap,
-            },
-        );
-
-        // ── always-visible toggle bar ───────────────────────────────────
-        //
-        // A short, full-width bar below the keyboard that force-toggles
-        // surface visibility through the *same* `KeyboardVisibilityExt`
-        // mechanism IM2 `activate`/`deactivate` use. Always visible (never
-        // `Display::Hidden`) so it remains a handle to bring the keyboard
-        // back when no text input is focused.
-        let bar = s.spawn(
-            win,
-            div()
-                .style(
-                    LayoutStyle::default()
-                        .row()
-                        .width(percent(100.0))
-                        .height(px(BAR_HEIGHT))
-                        .shrink(0.0),
-                )
-                // A visible fill so the bar reads as a tappable handle.
-                .background(s.color(ColorRole::PrimaryContainer)),
-        );
-        s.on::<Clicked>(bar, |ctx, _| {
-            ctx.toggle_keyboard_visibility();
-        });
-
-        // Apply visibility on every change — activate/deactivate or the bar.
-        // Two things happen, through the *same* `KeyboardVisibilityExt` flip:
-        //   1. The keyboard subtree is `Display::Hidden`/`Flex` so it takes
-        //      no space when hidden.
-        //   2. The layer surface itself is resized via `request_layer_size`
-        //      so the on-screen surface collapses to just the bar (no empty
-        //      black rectangle remains) when hidden, and grows back to the
-        //      keyboard + bar height when shown. The compositor answers
-        //      with a configure; the framework's `settle` reports
-        //      `Resized` and lays out at the new size.
-        s.on::<ApplyKeyboardVisibility>(me, move |ctx, _| {
-            let visible = ctx.keyboard_visible();
-            ctx.at(keyboard).unwrap().set_display(if visible {
-                Display::Flex
-            } else {
-                Display::Hidden
-            });
-            // `0` width stretches full-width only when left+right anchors
-            // are set; a fixed-width keyboard echoes its configured width.
-            let h = if visible { kb_height } else { BAR_HEIGHT };
-            let (mut surfaces, mut wl) = ctx.fetch::<(ResMut<Surfaces>, ResMut<Wayland>)>();
-            surfaces.request_layer_size(win_id, req_w, h as u32, &mut wl);
-        });
-
-        // Apply the initial visibility (starts hidden). The change handler
-        // above only fires on subsequent flips, so seed the keyboard's
-        // `Display` here to match the resource's initial value.
-        if !s.resource::<input_method::KeyboardVisibility>().visible
-            && let Some(mut kstyle) = s.component_mut::<LayoutStyle>(keyboard)
-        {
-            kstyle.display = Display::Hidden;
-        }
-
-        Shell
-    }
-}
-
-// ── main ──────────────────────────────────────────────────────────────────
-
-fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
-
-    // Load the keymap from layout.yaml (env var, local file, or bundled fallback).
-    let keymap = layout::load_keymap();
-
-    let mut app = App::new();
-    app.add_module(LayoutModule)
-        .add_module(PaintModule)
-        .add_module(WindowModule)
-        .add_module(InteractivityModule)
-        .add_module(RenderModule::default())
-        .insert_resource(Atlas::new());
-    app.insert_resource(LatchedState::default());
-
-    let theme = match keymap.keyboard.mode {
-        ThemeMode::Dark => MechanixTheme::dark(),
-        ThemeMode::Light => MechanixTheme::light(),
-    };
-    app.add_module(theme)
-        .add_module(RingModule::default())
-        .add_module(
-            WaylandModule::new()
-                .bind::<WlCompositor>()
-                .bind::<ZwpLinuxDmabufV1>()
-                .bind::<XdgWmBase>()
-                .bind::<WlSeat>(),
-        )
-        .add_module(PresentationModule {
-            app_id: "mecha.keyboard".into(),
-            budget: Budget::default(),
-        });
-
-    // Virtual-keyboard-v1 and input-method-v2 modules — bind their globals
-    // conditionally from `Globals` and handle their protocol events. These
-    // must install after `WaylandModule` (provides `Globals` + `Wayland`) and
-    // after the seat is bound.
-    app.add_module(virtual_keyboard::VirtualKeyboardModule);
-    app.add_module(input_method::InputMethodModule);
-    app.system(on_text_input_focused);
-
-    let fonts = Fonts::load(&mut app.resource_mut::<Atlas>());
-    let icons = Icons::load(
-        &mut app.resource_mut::<Atlas>(),
-        keymap.keyboard.font_size as u32,
-    );
-    app.insert_resource(icons);
-
-    let root = app.root();
-    app.spawn(
-        root,
-        ShellBuilder {
-            root,
-            fonts,
-            keymap,
-        },
-    );
-    app.run();
 }
 
 #[cfg(test)]

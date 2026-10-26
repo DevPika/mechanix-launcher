@@ -329,7 +329,7 @@ impl Keymap {
 
 impl View {
     /// Resolve one view's rows into keys. Positioning is left to the flex
-    /// layout in main.rs; each key carries only its outline width.
+    /// layout in keyboard.rs; each key carries only its outline width.
     fn resolve(
         layout: &Layout,
         styles: &HashMap<String, KeyStyle>,
@@ -435,7 +435,7 @@ fn resolve_action(token: &str, button: Option<&Button>) -> KeyAction {
             None => {}
         }
         // A modifier button latches for the next keystroke. Only Control and Alt
-        // are wired (see `toggle_latch` in main.rs and `virtual_keyboard`'s
+        // are wired (see `toggle_latch` in keyboard.rs and `virtual_keyboard`'s
         // `mod_masks`); every other modifier still defers to `Unhandled`.
         if let Some(m) = b.modifier.as_deref() {
             return match Modifier::from_name(m) {

@@ -4,7 +4,7 @@
 //! `ZwpVirtualKeyboardManagerV1` global conditionally from `Globals` and creates
 //! the `ZwpVirtualKeyboardV1` object once a seat is available. It also handles
 //! keymap compilation, keysym→keystroke indexing and memfd keymap file creation.
-//! Keycode emission lives in `vk_emit_keysym` in `main.rs`.
+//! Keycode emission lives in `vk_emit_keysym` in `keyboard.rs`.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -178,7 +178,7 @@ pub fn keysym_text(ks: Keysym) -> Option<String> {
     Some(ch.to_string())
 }
 
-// Key emission lives in main.rs: `vk_emit_keysym` sends keycodes through this
+// Key emission lives in keyboard.rs: `vk_emit_keysym` sends keycodes through this
 // state's virtual keyboard, and `im_commit_text` is the input-method path.
 
 // ── keymap memfd ───────────────────────────────────────────────────────────

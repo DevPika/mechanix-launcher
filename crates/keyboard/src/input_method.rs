@@ -277,5 +277,5 @@ fn on_input_method_event(app: &mut App, event: &ZwpInputMethodV2Event) {
 
 // ── outbound edits ────────────────────────────────────────────────────────
 
-// Text commit is done by `im_commit_text` in main.rs, which sends
+// Text commit is done by `im_commit_text` in keyboard.rs, which sends
 // `commit_string` + `commit(serial)` over Wayland.
