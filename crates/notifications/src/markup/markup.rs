@@ -1,7 +1,7 @@
 use super::parser::{MarkupParser, Run};
 
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Markup(Vec<Run>);
+pub struct Markup(pub Vec<Run>);
 
 impl Markup {
     pub fn parse(body: &str) -> Self {

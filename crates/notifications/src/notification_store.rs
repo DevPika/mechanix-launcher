@@ -14,5 +14,7 @@ pub struct Entry {
     pub id: u32,
     pub received_time: SystemTime,
     pub notification: Notification,
+    pub expiry_timeout: Option<Token>,
 }
+
 impl Resource for NotificationStore {}

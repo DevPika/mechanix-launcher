@@ -8,8 +8,9 @@ pub const SPEC_VERSION: &str = "1.3";
 pub const VENDOR: &str = "Mecha";
 pub const SERVICE_NAME: &str = "Mecha Notifications";
 
-pub const NOTIFICATIONS_CLOSED: u32 = 3;
+pub const NOTIFICATIONS_EXPIRY: u32 = 1;
 pub const NOTIFIFICATION_DISMISSED: u32 = 2;
+pub const NOTIFICATIONS_CLOSED: u32 = 3;
 
 fn build_bus_interface_spec() -> InterfaceSpec {
     InterfaceSpec::new(INTERFACE)

@@ -1,3 +1,4 @@
+use crate::expiry_timeout::schedule_expire;
 use crate::markup::Markup;
 use crate::{
     notification_store::{Entry, NotificationStore},
@@ -87,10 +88,12 @@ impl From<NotifyArgs> for Notify {
 pub fn append_notifications(app: &mut App, notify: &Notify) -> u32 {
     let replaced_notification = replace_notification(app, notify);
     if let Some(id) = replaced_notification {
+        schedule_expire(app, id, notify.notification.expire_timeout);
         app.signal(UpdateNotification(id));
         return id;
     }
     let id = add_notification(app, notify);
+    schedule_expire(app, id, notify.notification.expire_timeout);
     app.signal(AddNotification(id));
     id
 }
@@ -116,6 +119,7 @@ fn add_notification(app: &mut App, notify: &Notify) -> u32 {
         id,
         received_time: SystemTime::now(),
         notification: notify.notification.clone(),
+        expiry_timeout: None,
     });
     id
 }
