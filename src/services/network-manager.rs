@@ -2,6 +2,11 @@ use mecha_wayland::dbus::{Decode, Type};
 use mecha_wayland::prelude::*;
 use std::collections::HashMap;
 
+#[path = "network-manager/events.rs"]
+mod events;
+
+pub use events::{APUpdate, StateUpdate, WifiState};
+
 const NM: &str = "org.freedesktop.NetworkManager";
 const NM_MAIN_OBJ: &str = "/org/freedesktop/NetworkManager";
 const NM_DEVICE: &str = "org.freedesktop.NetworkManager.Device";
