@@ -5,7 +5,7 @@ use crate::icons::Icons;
 use crate::input_method::InputMethodModule;
 use crate::keyboard::{LatchedState, on_text_input_focused};
 use crate::layout;
-use crate::shell::ShellBuilder;
+use crate::ui::KeyboardUIBuilder;
 use crate::virtual_keyboard::VirtualKeyboardModule;
 
 /// Installs the on-screen keyboard: binds `zwp_virtual_keyboard_v1` and
@@ -48,7 +48,7 @@ impl Module for KeyboardModule {
         let root = app.root();
         app.spawn(
             root,
-            ShellBuilder {
+            KeyboardUIBuilder {
                 root,
                 fonts,
                 keymap,

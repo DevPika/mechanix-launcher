@@ -69,7 +69,7 @@ impl InputMethodState {
 // `done`) and the debug visibility bar flip the *same* flag through the
 // *same* setter. A `Signal` (`KeyboardVisibilityChanged`) is turned into a
 // broadcast `Event` (`ApplyKeyboardVisibility`) by a system, which the
-// `Shell` widget subscribes to in order to set `Display::Hidden`/`Flex` on
+// `KeyboardUI` widget subscribes to in order to set `Display::Hidden`/`Flex` on
 // the keyboard subtree. This mirrors the `theme` crate's `ThemeChanged` →
 // `ApplyTheme` bridge — the only generic resource→widget path the app core
 // exposes — so the bar and activate/deactivate share one mechanism (DRY).
@@ -89,7 +89,7 @@ pub struct KeyboardVisibilityChanged;
 impl Signal for KeyboardVisibilityChanged {}
 
 /// `Event`: re-apply the current visibility to the surface. Broadcast to the
-/// root and every descendant; the `Shell` widget handles it.
+/// root and every descendant; the `KeyboardUI` widget handles it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ApplyKeyboardVisibility;
 impl Event for ApplyKeyboardVisibility {}
@@ -147,7 +147,7 @@ pub struct TextInputFocused {
 impl Signal for TextInputFocused {}
 
 /// System: on `KeyboardVisibilityChanged`, broadcast `ApplyKeyboardVisibility`
-/// to the root and every descendant so the `Shell` handler re-applies
+/// to the root and every descendant so the `KeyboardUI` handler re-applies
 /// `Display`. Mirrors `theme::on_theme_changed`.
 fn on_keyboard_visibility_changed(app: &mut App, _: &KeyboardVisibilityChanged) {
     let mut targets = vec![app.root()];

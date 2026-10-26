@@ -19,21 +19,21 @@ const BAR_HEIGHT: f32 = 8.0;
 /// without reserving compositor space. `KeyboardInteractivity::None` keeps the
 /// OSK from stealing keyboard focus from the focused app; pointer taps on the
 /// layer surface are still delivered.
-pub(crate) struct Shell;
+pub(crate) struct KeyboardUI;
 
-pub(crate) struct ShellBuilder {
+pub(crate) struct KeyboardUIBuilder {
     pub(crate) root: NodeId,
     pub(crate) fonts: Fonts,
     pub(crate) keymap: Keymap,
 }
 
-impl Build for ShellBuilder {
-    type Widget = Shell;
+impl Build for KeyboardUIBuilder {
+    type Widget = KeyboardUI;
 }
 
-impl Widget for Shell {
-    type Builder = ShellBuilder;
-    fn build(b: ShellBuilder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
+impl Widget for KeyboardUI {
+    type Builder = KeyboardUIBuilder;
+    fn build(b: KeyboardUIBuilder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
         let style = b.keymap.keyboard;
         let kb_height = style.height;
         let (anchor, width) = match style.width {
@@ -44,7 +44,7 @@ impl Widget for Shell {
             layer: Layer::Top,
             anchor,
             exclusive_zone: -1,
-            namespace: "mechanix-keyboard".into(),
+            namespace: "keyboard".into(),
             keyboard_interactivity: KeyboardInteractivity::None,
         });
 
@@ -144,6 +144,6 @@ impl Widget for Shell {
             kstyle.display = Display::Hidden;
         }
 
-        Shell
+        KeyboardUI
     }
 }

@@ -23,7 +23,7 @@ mod keyboard;
 mod layout;
 mod module;
 mod shape;
-mod shell;
+mod ui;
 mod spacing;
 mod virtual_keyboard;
 
