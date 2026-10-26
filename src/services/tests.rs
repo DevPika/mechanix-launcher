@@ -6,6 +6,14 @@ use std::os::unix::net::UnixStream;
 
 struct TestApp(App);
 
+#[derive(Default)]
+struct StateUpdates(Vec<WifiState>);
+impl Resource for StateUpdates {}
+
+fn record_state_update(app: &mut App, event: &Emitted<StateUpdate>) {
+    app.resource_mut::<StateUpdates>().0.push(event.event.state);
+}
+
 impl Deref for TestApp {
     type Target = App;
 
@@ -349,6 +357,8 @@ fn properties_message(path: &ObjectPath, interface: &str, changed: PropMap) -> M
 #[test]
 fn get_all_reads_networking_hardware_and_wireless_flags_independently() {
     let (mut app, _peer) = setup();
+    app.init_resource::<StateUpdates>()
+        .system(record_state_update);
     let call = *app.resource::<NMState>().pending.keys().next().unwrap();
     let cases = [
         (Some(Value::Bool(true)), true),
@@ -383,6 +393,17 @@ fn get_all_reads_networking_hardware_and_wireless_flags_independently() {
                 assert_eq!(state.wireless_hardware_enabled, hardware_expected);
                 assert_eq!(state.wireless_enabled, wireless_expected);
                 assert!(state.pending.is_empty());
+                let expected = if !networking_expected || !hardware_expected {
+                    vec![WifiState::Unavailable]
+                } else if !wireless_expected {
+                    vec![WifiState::Off]
+                } else {
+                    Vec::new()
+                };
+                assert_eq!(
+                    std::mem::take(&mut app.resource_mut::<StateUpdates>().0),
+                    expected
+                );
             }
         }
     }

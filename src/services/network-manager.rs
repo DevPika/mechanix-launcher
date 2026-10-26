@@ -383,7 +383,9 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                 let (_, properties, invalidated) = match PropertiesChanged::parse(&event.msg) {
                     Ok(body) => body,
                     Err(error) => {
-                        eprintln!("NetworkManager: invalid AccessPoint PropertiesChanged: {error:?}");
+                        eprintln!(
+                            "NetworkManager: invalid AccessPoint PropertiesChanged: {error:?}"
+                        );
                         return;
                     }
                 };
@@ -459,7 +461,13 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 unwrap_property(&properties, "WirelessHardwareEnabled");
             state.wireless_enabled = unwrap_property(&properties, "WirelessEnabled");
 
-            // Todo: Event here
+            // Manager flags can establish Unavailable or Off. Device replies
+            // determine connection state when all three flags are enabled.
+            if !state.networking_enabled || !state.wireless_hardware_enabled {
+                events::emit_state_update(app, WifiState::Unavailable);
+            } else if !state.wireless_enabled {
+                events::emit_state_update(app, WifiState::Off);
+            }
 
             // Request all properties on devices
             let devices: Vec<ObjectPath> = unwrap_property(&properties, "Devices");
