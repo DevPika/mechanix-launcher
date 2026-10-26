@@ -701,6 +701,10 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
             };
 
             let mut state = app.resource_mut::<NMState>();
+            let should_emit = state.current_device.as_ref() == Some(&device_path)
+                && state.networking_enabled
+                && state.wireless_hardware_enabled
+                && state.wireless_enabled;
             let Some(device) = state.wifi_devices.get_mut(&device_path) else {
                 return;
             };
@@ -713,6 +717,11 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
 
             access_point.ssid = unwrap_property(&properties, "Ssid");
             access_point.strength = unwrap_property(&properties, "Strength");
+            if should_emit {
+                let ssid = access_point.ssid.clone();
+                let strength = access_point.strength;
+                events::emit_ap_update(app, Some(ssid), strength);
+            }
         }
     }
 }

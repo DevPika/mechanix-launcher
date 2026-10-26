@@ -14,6 +14,14 @@ fn record_state_update(app: &mut App, event: &Emitted<StateUpdate>) {
     app.resource_mut::<StateUpdates>().0.push(event.event.state);
 }
 
+#[derive(Default)]
+struct APUpdates(Vec<APUpdate>);
+impl Resource for APUpdates {}
+
+fn record_ap_update(app: &mut App, event: &Emitted<APUpdate>) {
+    app.resource_mut::<APUpdates>().0.push(event.event.clone());
+}
+
 impl Deref for TestApp {
     type Target = App;
 
@@ -837,6 +845,48 @@ fn device_properties_emits_only_for_selected_wifi_with_all_manager_flags_enabled
         assert_eq!(state.subscriptions.len(), 4);
         // Suppressing UI events still permits discovery and AP initialization.
         active_ap_call(&app, &other);
+    }
+}
+
+#[test]
+fn ap_properties_emits_only_for_selected_device_with_all_manager_flags_enabled() {
+    let selected = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let other = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");
+    let selected_ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/1");
+    let other_ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/2");
+    let ssid = b"wifi\xff";
+    for flags in 0..8 {
+        let (mut app, _peer) = setup();
+        discover(&mut app, &[selected.clone(), other.clone()]);
+        for path in [&selected, &other] {
+            let call = device_call(&app, path);
+            reply_properties(
+                &mut app,
+                call,
+                device_properties(nm_device_type::WIFI, nm_device_state::ACTIVE),
+            );
+        }
+        {
+            let mut state = app.resource_mut::<NMState>();
+            state.networking_enabled = flags & 1 != 0;
+            state.wireless_hardware_enabled = flags & 2 != 0;
+            state.wireless_enabled = flags & 4 != 0;
+        }
+        app.init_resource::<APUpdates>().system(record_ap_update);
+
+        initialize_ap(&mut app, &other, &other_ap, b"other", 80);
+        assert!(app.resource::<APUpdates>().0.is_empty());
+
+        initialize_ap(&mut app, &selected, &selected_ap, ssid, 61);
+        let expected = if flags == 7 {
+            vec![APUpdate {
+                ssid: Some(ssid.to_vec()),
+                strength: 61,
+            }]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(app.resource::<APUpdates>().0, expected);
     }
 }
 
