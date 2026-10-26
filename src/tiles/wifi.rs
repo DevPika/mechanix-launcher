@@ -1,7 +1,7 @@
 use mecha_wayland::prelude::*;
 
 use super::{build_label, build_tile};
-use crate::services::{APUpdate, StateUpdate, WifiState};
+use crate::services::{APUpdate, SetWifiEnabled, StateUpdate, WifiState};
 use crate::util::load_icon;
 
 // Inclusive lower bounds for the signal-strength icons (0–100%).
@@ -77,6 +77,7 @@ impl Widget for Wifi {
 
         s.on::<Clicked>(me, |ctx, _| {
             ctx.optimistic_off();
+            ctx.signal(SetWifiEnabled(false));
         });
         s.on::<StateUpdate>(me, |ctx, event| {
             ctx.set_state(event.state);
