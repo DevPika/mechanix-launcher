@@ -35,7 +35,8 @@ pub struct Wifi {
     last_ssid: Option<Vec<u8>>,
     strength: u8,
     /// Set by a click until the next StateUpdate, so the dot reacts immediately.
-    optimistic_off: bool,
+    /// `None` means the dot follows the real state.
+    optimistic_dot: Option<bool>,
     sprite: SpriteId,
 }
 
@@ -76,8 +77,7 @@ impl Widget for Wifi {
         );
 
         s.on::<Clicked>(me, |ctx, _| {
-            ctx.optimistic_off();
-            ctx.signal(SetWifiEnabled(false));
+            ctx.toggle();
         });
         s.on::<StateUpdate>(me, |ctx, event| {
             ctx.set_state(event.state);
@@ -100,7 +100,7 @@ impl Widget for Wifi {
             ssid: None,
             last_ssid: None,
             strength: 0,
-            optimistic_off: false,
+            optimistic_dot: None,
             sprite: icon_x,
         }
     }
@@ -109,7 +109,7 @@ impl Widget for Wifi {
 pub trait WifiContext {
     fn set_state(&mut self, state: WifiState);
     fn set_access_point(&mut self, update: &APUpdate);
-    fn optimistic_off(&mut self);
+    fn toggle(&mut self);
     fn render(&mut self);
 }
 
@@ -118,7 +118,7 @@ impl WifiContext for Context<'_, Wifi> {
         {
             let me = self.me();
             me.state = state;
-            me.optimistic_off = false;
+            me.optimistic_dot = None;
             // These states have no connection to name. Connected and
             // Disconnecting keep the latest APUpdate SSID.
             if !matches!(state, WifiState::Connected | WifiState::Disconnecting) {
@@ -141,9 +141,22 @@ impl WifiContext for Context<'_, Wifi> {
         self.render();
     }
 
-    fn optimistic_off(&mut self) {
-        self.me().optimistic_off = true;
+    fn toggle(&mut self) {
+        // `Off` is the only state where NetworkManager reports
+        // WirelessEnabled=false. `Unavailable` has no meaningful software
+        // switch to toggle: networking or the radio may already be blocked.
+        let enabled = match self.me().state {
+            WifiState::Off => true,
+            WifiState::Unavailable => return,
+            WifiState::On
+            | WifiState::Disconnected
+            | WifiState::Connecting
+            | WifiState::Connected
+            | WifiState::Disconnecting => false,
+        };
+        self.me().optimistic_dot = Some(enabled);
         self.render();
+        self.signal(SetWifiEnabled(enabled));
     }
 
     fn render(&mut self) {
@@ -152,7 +165,7 @@ impl WifiContext for Context<'_, Wifi> {
             ssid,
             last_ssid,
             strength,
-            optimistic_off,
+            optimistic_dot,
             icon_handle,
             text_handle,
             dot_handle,
@@ -169,7 +182,7 @@ impl WifiContext for Context<'_, Wifi> {
                 me.ssid.clone(),
                 me.last_ssid.clone(),
                 me.strength,
-                me.optimistic_off,
+                me.optimistic_dot,
                 me.icon,
                 me.name,
                 me.dot,
@@ -217,7 +230,7 @@ impl WifiContext for Context<'_, Wifi> {
             state,
             WifiState::On | WifiState::Connecting | WifiState::Connected
         );
-        let dot_enabled = state_enabled && !optimistic_off;
+        let dot_enabled = optimistic_dot.unwrap_or(state_enabled);
 
         let bg_color = if state_enabled {
             self.color(ColorRole::Surface)
@@ -255,12 +268,21 @@ impl WifiContext for Context<'_, Wifi> {
 mod tests {
     use super::*;
 
+    #[derive(Default)]
+    struct WifiSignals(Vec<bool>);
+    impl Resource for WifiSignals {}
+
+    fn record_set_wifi(app: &mut App, event: &SetWifiEnabled) {
+        app.resource_mut::<WifiSignals>().0.push(event.0);
+    }
+
     fn setup() -> (App, Handle<Wifi>) {
         let mut app = App::new();
         app.add_module(LayoutModule)
             .add_module(PaintModule)
             .add_module(MechanixTheme::dark())
             .insert_resource(Atlas::new());
+        app.init_resource::<WifiSignals>().system(record_set_wifi);
         let font = app
             .resource_mut::<Atlas>()
             .add_font(include_bytes!("../../assets/fonts/GeistMono-Regular.ttf"))
@@ -506,6 +528,7 @@ mod tests {
             assert!(tinted(&app, handle));
             assert_eq!(label(&app, wifi), "Office");
         }
+        assert_eq!(app.resource::<WifiSignals>().0, vec![false]);
 
         emit(
             &mut app,
@@ -515,5 +538,85 @@ mod tests {
         );
         assert!(dot_enabled(&app, app.widget::<Wifi>(handle).unwrap()));
         assert!(tinted(&app, handle));
+    }
+
+    #[test]
+    fn click_toggles_wifi_based_on_the_radio_state() {
+        let (mut app, handle) = setup();
+        let click = |app: &mut App| {
+            emit(
+                app,
+                Clicked {
+                    contact: ContactId::Mouse,
+                    position: Point::ZERO,
+                },
+            );
+        };
+
+        emit(
+            &mut app,
+            StateUpdate {
+                state: WifiState::Off,
+            },
+        );
+        assert!(!dot_enabled(&app, app.widget::<Wifi>(handle).unwrap()));
+        click(&mut app);
+        assert!(dot_enabled(&app, app.widget::<Wifi>(handle).unwrap()));
+        assert_eq!(app.resource::<WifiSignals>().0, vec![true]);
+
+        // The next state update replaces the optimistic dot.
+        emit(
+            &mut app,
+            StateUpdate {
+                state: WifiState::On,
+            },
+        );
+        assert!(dot_enabled(&app, app.widget::<Wifi>(handle).unwrap()));
+        click(&mut app);
+        assert!(!dot_enabled(&app, app.widget::<Wifi>(handle).unwrap()));
+        assert_eq!(app.resource::<WifiSignals>().0, vec![true, false]);
+
+        emit(
+            &mut app,
+            StateUpdate {
+                state: WifiState::Off,
+            },
+        );
+        assert!(!dot_enabled(&app, app.widget::<Wifi>(handle).unwrap()));
+    }
+
+    #[test]
+    fn click_while_disconnected_disables_the_radio_but_unavailable_is_a_no_op() {
+        let (mut app, handle) = setup();
+        let click = |app: &mut App| {
+            emit(
+                app,
+                Clicked {
+                    contact: ContactId::Mouse,
+                    position: Point::ZERO,
+                },
+            );
+        };
+
+        // Disconnected means the radio is on, so the click turns it off.
+        emit(
+            &mut app,
+            StateUpdate {
+                state: WifiState::Disconnected,
+            },
+        );
+        click(&mut app);
+        assert_eq!(app.resource::<WifiSignals>().0, vec![false]);
+
+        // Unavailable has no meaningful software switch to toggle.
+        emit(
+            &mut app,
+            StateUpdate {
+                state: WifiState::Unavailable,
+            },
+        );
+        click(&mut app);
+        assert_eq!(app.resource::<WifiSignals>().0, vec![false]);
+        assert!(!dot_enabled(&app, app.widget::<Wifi>(handle).unwrap()));
     }
 }
