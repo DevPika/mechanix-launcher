@@ -410,6 +410,138 @@ fn get_all_reads_networking_hardware_and_wireless_flags_independently() {
 }
 
 #[test]
+fn get_all_publishes_a_device_discovered_before_the_manager_reply() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    for (device_state, expected) in [
+        (nm_device_state::UNKNOWN, WifiState::On),
+        (nm_device_state::UNMANAGED, WifiState::Unavailable),
+        (nm_device_state::UNAVAILABLE, WifiState::Unavailable),
+        (nm_device_state::DISCONNECTED, WifiState::Disconnected),
+        (nm_device_state::PREPARE, WifiState::Connecting),
+        (nm_device_state::CONFIG, WifiState::Connecting),
+        (nm_device_state::NEED_AUTH, WifiState::Connecting),
+        (nm_device_state::IP_CONFIG, WifiState::Connecting),
+        (nm_device_state::IP_CHECK, WifiState::Connecting),
+        (nm_device_state::SECONDARIES, WifiState::Connecting),
+        (nm_device_state::ACTIVE, WifiState::Connected),
+        (nm_device_state::DEACTIVATING, WifiState::Disconnecting),
+        (nm_device_state::FAILED, WifiState::Disconnected),
+        (999, WifiState::On),
+    ] {
+        let (mut app, _peer) = setup();
+        app.init_resource::<StateUpdates>()
+            .system(record_state_update);
+        add_device(&mut app, &path);
+        let call = device_call(&app, &path);
+        reply_properties(
+            &mut app,
+            call,
+            device_properties(nm_device_type::WIFI, device_state),
+        );
+        assert_eq!(
+            app.resource::<NMState>().current_device.as_ref(),
+            Some(&path)
+        );
+        assert!(app.resource::<StateUpdates>().0.is_empty());
+
+        let call = pending_call(&app, |kind| matches!(kind, CallType::GetAll));
+        reply_properties(
+            &mut app,
+            call,
+            manager_properties(std::slice::from_ref(&path)),
+        );
+        assert_eq!(app.resource::<StateUpdates>().0, vec![expected]);
+
+        // The manager snapshot queues another discovery read, but the existing
+        // device guard must preserve both its state and the single UI update.
+        let call = device_call(&app, &path);
+        reply_properties(
+            &mut app,
+            call,
+            device_properties(nm_device_type::WIFI, device_state),
+        );
+        assert_eq!(app.resource::<StateUpdates>().0, vec![expected]);
+        assert_eq!(app.resource::<NMState>().wifi_devices.len(), 1);
+    }
+}
+
+#[test]
+fn get_all_refresh_uses_latest_state_of_only_the_selected_device() {
+    let selected = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let other = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");
+    let (mut app, _peer) = setup();
+    app.init_resource::<StateUpdates>()
+        .system(record_state_update);
+    for path in [&selected, &other] {
+        add_device(&mut app, path);
+        let call = device_call(&app, path);
+        reply_properties(
+            &mut app,
+            call,
+            device_properties(nm_device_type::WIFI, nm_device_state::ACTIVE),
+        );
+    }
+    let id = app.resource::<NMState>().wifi_devices[&selected]
+        .state_changed
+        .unwrap();
+    app.signal(state_changed_signal(
+        &selected,
+        id,
+        nm_device_state::DISCONNECTED,
+        nm_device_state::ACTIVE,
+    ));
+    app.flush();
+    assert!(app.resource::<StateUpdates>().0.is_empty());
+
+    let call = pending_call(&app, |kind| matches!(kind, CallType::GetAll));
+    reply_properties(
+        &mut app,
+        call,
+        manager_properties(&[selected.clone(), other.clone()]),
+    );
+    assert_eq!(
+        app.resource::<StateUpdates>().0,
+        vec![WifiState::Disconnected]
+    );
+    let state = app.resource::<NMState>();
+    assert_eq!(state.current_device.as_ref(), Some(&selected));
+    assert_eq!(state.wifi_devices[&other].state, nm_device_state::ACTIVE);
+}
+
+#[test]
+fn get_all_manager_flags_override_an_already_connected_device() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    for (networking, hardware, wireless, expected) in [
+        (false, false, false, WifiState::Unavailable),
+        (false, false, true, WifiState::Unavailable),
+        (false, true, false, WifiState::Unavailable),
+        (false, true, true, WifiState::Unavailable),
+        (true, false, false, WifiState::Unavailable),
+        (true, false, true, WifiState::Unavailable),
+        (true, true, false, WifiState::Off),
+        (true, true, true, WifiState::Connected),
+    ] {
+        let (mut app, _peer) = setup();
+        app.init_resource::<StateUpdates>()
+            .system(record_state_update);
+        add_device(&mut app, &path);
+        let call = device_call(&app, &path);
+        reply_properties(
+            &mut app,
+            call,
+            device_properties(nm_device_type::WIFI, nm_device_state::ACTIVE),
+        );
+        let call = pending_call(&app, |kind| matches!(kind, CallType::GetAll));
+        let mut properties = manager_properties(std::slice::from_ref(&path));
+        properties.insert("NetworkingEnabled".into(), Value::Bool(networking));
+        properties.insert("WirelessHardwareEnabled".into(), Value::Bool(hardware));
+        properties.insert("WirelessEnabled".into(), Value::Bool(wireless));
+        reply_properties(&mut app, call, properties);
+        assert_eq!(app.resource::<StateUpdates>().0, vec![expected]);
+    }
+}
+
+#[test]
 fn install_starts_with_disabled_flags_manager_matches_and_one_request() {
     let (app, _peer) = setup();
     let state = app.resource::<NMState>();

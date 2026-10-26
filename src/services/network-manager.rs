@@ -23,6 +23,15 @@ mod nm_device_type {
 mod nm_device_state {
     type EType = u32;
     pub(super) const UNKNOWN: EType = 0;
+    pub(super) const UNMANAGED: EType = 10;
+    pub(super) const UNAVAILABLE: EType = 20;
+    pub(super) const PREPARE: EType = 40;
+    pub(super) const CONFIG: EType = 50;
+    pub(super) const NEED_AUTH: EType = 60;
+    pub(super) const IP_CONFIG: EType = 70;
+    pub(super) const IP_CHECK: EType = 80;
+    pub(super) const SECONDARIES: EType = 90;
+    pub(super) const FAILED: EType = 120;
     /// has a local or global network connection
     pub(super) const ACTIVE: EType = 100;
     /// in the process of disconnecting from a network connection
@@ -461,12 +470,37 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 unwrap_property(&properties, "WirelessHardwareEnabled");
             state.wireless_enabled = unwrap_property(&properties, "WirelessEnabled");
 
-            // Manager flags can establish Unavailable or Off. Device replies
-            // determine connection state when all three flags are enabled.
+            // Manager restrictions take precedence over any known device state.
             if !state.networking_enabled || !state.wireless_hardware_enabled {
                 events::emit_state_update(app, WifiState::Unavailable);
             } else if !state.wireless_enabled {
                 events::emit_state_update(app, WifiState::Off);
+            } else if let Some(device) = state
+                .current_device
+                .as_ref()
+                .and_then(|path| state.wifi_devices.get(path))
+            {
+                // DeviceAdded may finish discovery before the manager's initial
+                // reply. Publish its latest state now that the flags are known.
+                // Otherwise, leave the initial update to the device reply.
+                let wifi_state = match device.state {
+                    nm_device_state::UNMANAGED | nm_device_state::UNAVAILABLE => {
+                        WifiState::Unavailable
+                    }
+                    nm_device_state::DISCONNECTED | nm_device_state::FAILED => {
+                        WifiState::Disconnected
+                    }
+                    nm_device_state::PREPARE
+                    | nm_device_state::CONFIG
+                    | nm_device_state::NEED_AUTH
+                    | nm_device_state::IP_CONFIG
+                    | nm_device_state::IP_CHECK
+                    | nm_device_state::SECONDARIES => WifiState::Connecting,
+                    nm_device_state::ACTIVE => WifiState::Connected,
+                    nm_device_state::DEACTIVATING => WifiState::Disconnecting,
+                    _ => WifiState::On,
+                };
+                events::emit_state_update(app, wifi_state);
             }
 
             // Request all properties on devices
@@ -540,6 +574,8 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
             if state.current_device.is_none() {
                 state.current_device = Some(path.clone());
             }
+
+				// TODO: send state update here
 
             // if we're currently connected, get access point information
             if device_state == nm_device_state::ACTIVE {
