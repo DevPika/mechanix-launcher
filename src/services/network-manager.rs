@@ -323,6 +323,13 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                 let path = path.clone();
                 if let Some(device) = state.wifi_devices.get_mut(&path) {
                     device.state = new_state;
+                    if state.current_device.as_ref() == Some(&path)
+                        && state.networking_enabled
+                        && state.wireless_hardware_enabled
+                        && state.wireless_enabled
+                    {
+                        events::emit_device_state_update(app, new_state);
+                    }
                 }
             }
             Subscription::WirelessProperties(path) => {

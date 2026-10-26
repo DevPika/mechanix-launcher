@@ -917,21 +917,23 @@ fn state_changed_updates_only_its_device_and_keeps_ap_tracking() {
         );
     }
 
+    app.init_resource::<StateUpdates>()
+        .system(record_state_update);
     for (target, untouched) in [(&other, &selected), (&selected, &other)] {
         let id = app.resource::<NMState>().wifi_devices[target]
             .state_changed
             .unwrap();
         let mut old_state = nm_device_state::ACTIVE;
-        for new_state in [
-            nm_device_state::DEACTIVATING,
-            nm_device_state::DISCONNECTED,
-            nm_device_state::UNKNOWN,
-            10,  // UNMANAGED
-            20,  // UNAVAILABLE
-            40,  // PREPARE
-            120, // FAILED
-            nm_device_state::ACTIVE,
-            nm_device_state::ACTIVE, // Repeated notifications are harmless.
+        for (new_state, expected) in [
+            (nm_device_state::DEACTIVATING, WifiState::Disconnecting),
+            (nm_device_state::DISCONNECTED, WifiState::Disconnected),
+            (nm_device_state::UNKNOWN, WifiState::On),
+            (nm_device_state::UNMANAGED, WifiState::Unavailable),
+            (nm_device_state::UNAVAILABLE, WifiState::Unavailable),
+            (nm_device_state::PREPARE, WifiState::Connecting),
+            (nm_device_state::FAILED, WifiState::Disconnected),
+            (nm_device_state::ACTIVE, WifiState::Connected),
+            (nm_device_state::ACTIVE, WifiState::Connected), // Repeated notifications still emit.
         ] {
             app.signal(state_changed_signal(target, id, new_state, old_state));
             app.flush();
@@ -943,8 +945,57 @@ fn state_changed_updates_only_its_device_and_keeps_ap_tracking() {
             assert!(state.pending.is_empty());
             assert_device(&app, &selected, Some((&selected_ap, b"Office", 75)));
             assert_device(&app, &other, Some((&other_ap, b"Office", 75)));
+            assert_eq!(
+                std::mem::take(&mut app.resource_mut::<StateUpdates>().0),
+                if target == &selected {
+                    vec![expected]
+                } else {
+                    Vec::new()
+                }
+            );
             old_state = new_state;
         }
+    }
+}
+
+#[test]
+fn state_changed_updates_cache_but_emits_only_when_all_manager_flags_are_enabled() {
+    let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let (mut app, _peer) = setup();
+    connected_device(&mut app, &path);
+    app.init_resource::<StateUpdates>()
+        .system(record_state_update);
+    let id = app.resource::<NMState>().wifi_devices[&path]
+        .state_changed
+        .unwrap();
+    let mut old_state = nm_device_state::ACTIVE;
+    for flags in 0..8 {
+        {
+            let mut state = app.resource_mut::<NMState>();
+            state.networking_enabled = flags & 1 != 0;
+            state.wireless_hardware_enabled = flags & 2 != 0;
+            state.wireless_enabled = flags & 4 != 0;
+        }
+        let (new_state, expected) = if flags % 2 == 0 {
+            (nm_device_state::DISCONNECTED, WifiState::Disconnected)
+        } else {
+            (nm_device_state::PREPARE, WifiState::Connecting)
+        };
+        app.signal(state_changed_signal(&path, id, new_state, old_state));
+        app.flush();
+        assert_eq!(
+            app.resource::<NMState>().wifi_devices[&path].state,
+            new_state
+        );
+        assert_eq!(
+            std::mem::take(&mut app.resource_mut::<StateUpdates>().0),
+            if flags == 7 {
+                vec![expected]
+            } else {
+                Vec::new()
+            }
+        );
+        old_state = new_state;
     }
 }
 
