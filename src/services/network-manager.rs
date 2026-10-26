@@ -575,7 +575,32 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 state.current_device = Some(path.clone());
             }
 
-				// TODO: send state update here
+            // Manager handlers report disabled/unavailable flags. Only the
+            // selected device publishes connection state while Wi-Fi is enabled.
+            if state.current_device.as_ref() == Some(&path)
+                && state.networking_enabled
+                && state.wireless_hardware_enabled
+                && state.wireless_enabled
+            {
+                let wifi_state = match device_state {
+                    nm_device_state::UNMANAGED | nm_device_state::UNAVAILABLE => {
+                        WifiState::Unavailable
+                    }
+                    nm_device_state::DISCONNECTED | nm_device_state::FAILED => {
+                        WifiState::Disconnected
+                    }
+                    nm_device_state::PREPARE
+                    | nm_device_state::CONFIG
+                    | nm_device_state::NEED_AUTH
+                    | nm_device_state::IP_CONFIG
+                    | nm_device_state::IP_CHECK
+                    | nm_device_state::SECONDARIES => WifiState::Connecting,
+                    nm_device_state::ACTIVE => WifiState::Connected,
+                    nm_device_state::DEACTIVATING => WifiState::Disconnecting,
+                    _ => WifiState::On,
+                };
+                events::emit_state_update(app, wifi_state);
+            }
 
             // if we're currently connected, get access point information
             if device_state == nm_device_state::ACTIVE {

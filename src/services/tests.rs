@@ -727,18 +727,39 @@ fn current_device_stays_none_when_all_device_reads_fail() {
 #[test]
 fn wifi_state_controls_initial_ap_read_but_not_device_subscriptions() {
     let path = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
-    let mut cases: Vec<_> = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]
-        .into_iter()
-        .map(|state| (Some(Value::U32(state)), state))
-        .collect();
+    let mut cases: Vec<_> = [
+        (nm_device_state::UNKNOWN, WifiState::On),
+        (nm_device_state::UNMANAGED, WifiState::Unavailable),
+        (nm_device_state::UNAVAILABLE, WifiState::Unavailable),
+        (nm_device_state::DISCONNECTED, WifiState::Disconnected),
+        (nm_device_state::PREPARE, WifiState::Connecting),
+        (nm_device_state::CONFIG, WifiState::Connecting),
+        (nm_device_state::NEED_AUTH, WifiState::Connecting),
+        (nm_device_state::IP_CONFIG, WifiState::Connecting),
+        (nm_device_state::IP_CHECK, WifiState::Connecting),
+        (nm_device_state::SECONDARIES, WifiState::Connecting),
+        (nm_device_state::ACTIVE, WifiState::Connected),
+        (nm_device_state::DEACTIVATING, WifiState::Disconnecting),
+        (nm_device_state::FAILED, WifiState::Disconnected),
+        (999, WifiState::On),
+    ]
+    .into_iter()
+    .map(|(state, event)| (Some(Value::U32(state)), state, event))
+    .collect();
     cases.extend([
-        (None, nm_device_state::UNKNOWN),
-        (Some(Value::Str("100".into())), nm_device_state::UNKNOWN),
+        (None, nm_device_state::UNKNOWN, WifiState::On),
+        (
+            Some(Value::Str("100".into())),
+            nm_device_state::UNKNOWN,
+            WifiState::On,
+        ),
     ]);
-    for (value, expected_state) in cases {
+    for (value, expected_state, expected_event) in cases {
         let activated = expected_state == nm_device_state::ACTIVE;
         let (mut app, _peer) = setup();
         discover(&mut app, std::slice::from_ref(&path));
+        app.init_resource::<StateUpdates>()
+            .system(record_state_update);
         let call = device_call(&app, &path);
         let mut properties = PropMap::from([("DeviceType".into(), Value::U32(2))]);
         if let Some(value) = value {
@@ -751,9 +772,71 @@ fn wifi_state_controls_initial_ap_read_but_not_device_subscriptions() {
         assert_eq!(state.wifi_devices[&path].state, expected_state);
         assert_eq!(state.subscriptions.len(), 2);
         assert_eq!(state.pending.len(), usize::from(activated));
+        assert_eq!(app.resource::<StateUpdates>().0, vec![expected_event]);
         if activated {
             active_ap_call(&app, &path);
         }
+    }
+}
+
+#[test]
+fn device_properties_emits_only_for_selected_wifi_with_all_manager_flags_enabled() {
+    let ethernet = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let selected = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");
+    let other = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/3");
+    for flags in 0..8 {
+        let (mut app, _peer) = setup();
+        let mut properties =
+            manager_properties(&[ethernet.clone(), selected.clone(), other.clone()]);
+        properties.insert("NetworkingEnabled".into(), Value::Bool(flags & 1 != 0));
+        properties.insert(
+            "WirelessHardwareEnabled".into(),
+            Value::Bool(flags & 2 != 0),
+        );
+        properties.insert("WirelessEnabled".into(), Value::Bool(flags & 4 != 0));
+        let call = pending_call(&app, |kind| matches!(kind, CallType::GetAll));
+        reply_properties(&mut app, call, properties);
+        app.init_resource::<StateUpdates>()
+            .system(record_state_update);
+
+        let call = device_call(&app, &ethernet);
+        reply_properties(
+            &mut app,
+            call,
+            device_properties(1, nm_device_state::ACTIVE),
+        );
+        assert!(app.resource::<StateUpdates>().0.is_empty());
+
+        let call = device_call(&app, &selected);
+        reply_properties(
+            &mut app,
+            call,
+            device_properties(nm_device_type::WIFI, nm_device_state::DISCONNECTED),
+        );
+        let expected = if flags == 7 {
+            vec![WifiState::Disconnected]
+        } else {
+            Vec::new()
+        };
+        assert_eq!(app.resource::<StateUpdates>().0, expected);
+
+        let call = device_call(&app, &other);
+        reply_properties(
+            &mut app,
+            call,
+            device_properties(nm_device_type::WIFI, nm_device_state::ACTIVE),
+        );
+        assert_eq!(app.resource::<StateUpdates>().0, expected);
+        let state = app.resource::<NMState>();
+        assert_eq!(state.current_device.as_ref(), Some(&selected));
+        assert_eq!(
+            state.wifi_devices[&selected].state,
+            nm_device_state::DISCONNECTED
+        );
+        assert_eq!(state.wifi_devices[&other].state, nm_device_state::ACTIVE);
+        assert_eq!(state.subscriptions.len(), 4);
+        // Suppressing UI events still permits discovery and AP initialization.
+        active_ap_call(&app, &other);
     }
 }
 
