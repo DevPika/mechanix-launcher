@@ -444,6 +444,10 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                     }
                 };
                 let path = path.clone();
+                let should_emit = state.current_device.as_ref() == Some(&path)
+                    && state.networking_enabled
+                    && state.wireless_hardware_enabled
+                    && state.wireless_enabled;
                 let Some(ap) = state
                     .wifi_devices
                     .get_mut(&path)
@@ -462,6 +466,11 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                     ap.strength = 0;
                 } else if let Some(strength) = changed_property::<u8>(&properties, "Strength") {
                     ap.strength = strength;
+                }
+                if should_emit {
+                    let ssid = ap.ssid.clone();
+                    let strength = ap.strength;
+                    events::emit_ap_update(app, Some(ssid), strength);
                 }
             }
         }

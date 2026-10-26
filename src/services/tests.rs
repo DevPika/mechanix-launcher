@@ -1256,7 +1256,7 @@ fn wireless_ap_clear_supersedes_pending_initial_and_ap_property_reads() {
 }
 
 #[test]
-fn wireless_ap_events_require_selected_device_and_all_manager_flags() {
+fn ap_signal_events_require_selected_device_and_all_manager_flags() {
     let selected = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
     let other = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");
     let ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/10");
@@ -1289,6 +1289,8 @@ fn wireless_ap_events_require_selected_device_and_all_manager_flags() {
             );
             assert_device(&app, path, Some((&ap, b"", 0)));
             ap_properties_call(&app, path, &ap);
+            ap_change(&mut app, path, ap_properties(b"Updated", 61), &[]);
+            assert_device(&app, path, Some((&ap, b"Updated", 61)));
             wireless_change(&mut app, path, PropMap::new(), &["ActiveAccessPoint"]);
             assert_device(&app, path, None);
             assert!(app.resource::<NMState>().pending.is_empty());
@@ -1299,6 +1301,10 @@ fn wireless_ap_events_require_selected_device_and_all_manager_flags() {
                         APUpdate {
                             ssid: Some(Vec::new()),
                             strength: 0,
+                        },
+                        APUpdate {
+                            ssid: Some(b"Updated".to_vec()),
+                            strength: 61,
                         },
                         APUpdate {
                             ssid: None,
@@ -1401,6 +1407,7 @@ fn ap_property_changes_decode_fields_independently_and_preserve_raw_ssid() {
             let (mut app, _peer) = setup();
             connected_device(&mut app, &path);
             initialize_ap(&mut app, &path, &ap, b"Office", 70);
+            app.init_resource::<APUpdates>().system(record_ap_update);
             let mut changed = PropMap::new();
             if let Some(value) = ssid.clone() {
                 changed.insert("Ssid".into(), value);
@@ -1410,6 +1417,13 @@ fn ap_property_changes_decode_fields_independently_and_preserve_raw_ssid() {
             }
             ap_change(&mut app, &path, changed, &[]);
             assert_device(&app, &path, Some((&ap, expected_ssid, expected_strength)));
+            assert_eq!(
+                app.resource::<APUpdates>().0,
+                vec![APUpdate {
+                    ssid: Some(expected_ssid.to_vec()),
+                    strength: expected_strength,
+                }]
+            );
             assert!(app.resource::<NMState>().pending.is_empty());
             assert_eq!(app.resource::<NMState>().subscriptions.len(), 3);
         }
@@ -1437,6 +1451,7 @@ fn ap_property_invalidations_reset_only_named_fields_and_override_supplied_value
                 let (mut app, _peer) = setup();
                 connected_device(&mut app, &path);
                 initialize_ap(&mut app, &path, &ap, b"Office", 70);
+                app.init_resource::<APUpdates>().system(record_ap_update);
                 let mut invalidated = vec!["Frequency"];
                 if invalidate_ssid {
                     invalidated.push("Ssid");
@@ -1460,10 +1475,32 @@ fn ap_property_invalidations_reset_only_named_fields_and_override_supplied_value
                 );
                 assert!(app.resource::<NMState>().pending.is_empty());
                 assert_eq!(app.resource::<NMState>().subscriptions.len(), 3);
+                assert_eq!(
+                    std::mem::take(&mut app.resource_mut::<APUpdates>().0),
+                    vec![APUpdate {
+                        ssid: Some(if invalidate_ssid {
+                            Vec::new()
+                        } else {
+                            supplied_ssid.to_vec()
+                        }),
+                        strength: if invalidate_strength {
+                            0
+                        } else {
+                            supplied_strength
+                        },
+                    }]
+                );
 
                 // Invalidations clear values, not the AP or its subscription.
                 ap_change(&mut app, &path, ap_properties(b"Recovered", 42), &[]);
                 assert_device(&app, &path, Some((&ap, b"Recovered", 42)));
+                assert_eq!(
+                    app.resource::<APUpdates>().0,
+                    vec![APUpdate {
+                        ssid: Some(b"Recovered".to_vec()),
+                        strength: 42
+                    }]
+                );
             }
         }
     }
