@@ -322,7 +322,17 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                 // Device updates may have been suppressed while a manager flag
                 // was disabled. Publish the latest stored state when enabled.
                 let device_state = device.state;
+                // AP changes and clears are also cached without UI events while
+                // disabled. Replay the full AP snapshot, including None, here:
+                // another AP signal may never arrive to correct stale UI details.
+                let (ssid, strength) = device
+                    .active_ap
+                    .as_ref()
+                    .map(|ap| (Some(ap.ssid.clone()), ap.strength))
+                    .unwrap_or((None, 0));
                 events::emit_device_state_update(app, device_state);
+                // TODO: may cause dot flickering ?
+                events::emit_ap_update(app, ssid, strength);
             }
             continue;
         }
@@ -558,7 +568,16 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 // reply. Publish its latest state now that the flags are known.
                 // Otherwise, leave the initial update to the device reply.
                 let device_state = device.state;
+                // AP discovery may also finish before this reply, while our
+                // default disabled flags suppress its UI events. Replay its
+                // cached details (or clear them) rather than await another signal.
+                let (ssid, strength) = device
+                    .active_ap
+                    .as_ref()
+                    .map(|ap| (Some(ap.ssid.clone()), ap.strength))
+                    .unwrap_or((None, 0));
                 events::emit_device_state_update(app, device_state);
+                events::emit_ap_update(app, ssid, strength);
             }
 
             // Request all properties on devices
