@@ -2638,6 +2638,94 @@ fn manager_partial_values_and_invalidations_update_only_valid_named_flags() {
 }
 
 #[test]
+fn manager_enable_replays_ap_updates_and_clears_suppressed_during_startup_or_disable() {
+    let selected = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
+    let other = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");
+    let selected_ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/10");
+    let other_ap = ObjectPath::from("/org/freedesktop/NetworkManager/AccessPoint/20");
+    for disabled_flag in [
+        None,
+        Some("NetworkingEnabled"),
+        Some("WirelessHardwareEnabled"),
+        Some("WirelessEnabled"),
+    ] {
+        for clear_ap in [false, true] {
+            let (mut app, _peer) = setup();
+            if disabled_flag.is_some() {
+                discover(&mut app, &[selected.clone(), other.clone()]);
+            } else {
+                // Discovery can complete before the initial manager reply.
+                add_device(&mut app, &selected);
+                add_device(&mut app, &other);
+            }
+            for (path, ap) in [(&selected, &selected_ap), (&other, &other_ap)] {
+                let call = device_call(&app, path);
+                reply_properties(
+                    &mut app,
+                    call,
+                    device_properties(nm_device_type::WIFI, nm_device_state::ACTIVE),
+                );
+                initialize_ap(&mut app, path, ap, b"Old", 20);
+            }
+            let id = app.resource::<NMState>().properties_changed.unwrap();
+            if let Some(flag) = disabled_flag {
+                app.signal(SignalReceived {
+                    bus: BusId::System,
+                    matches: [id].into_iter().collect(),
+                    msg: properties_message(
+                        &ObjectPath::from(NM_MAIN_OBJ),
+                        NM,
+                        PropMap::from([(flag.into(), Value::Bool(false))]),
+                    ),
+                });
+                app.flush();
+            }
+            app.init_resource::<APUpdates>().system(record_ap_update);
+            app.init_resource::<StateUpdates>()
+                .system(record_state_update);
+            ap_change(&mut app, &other, ap_properties(b"Other", 99), &[]);
+            let expected_ap = if clear_ap {
+                wireless_change(&mut app, &selected, PropMap::new(), &["ActiveAccessPoint"]);
+                APUpdate {
+                    ssid: None,
+                    strength: 0,
+                }
+            } else {
+                ap_change(&mut app, &selected, ap_properties(b"Latest\xff", 73), &[]);
+                APUpdate {
+                    ssid: Some(b"Latest\xff".to_vec()),
+                    strength: 73,
+                }
+            };
+            assert!(app.resource::<APUpdates>().0.is_empty());
+            assert!(app.resource::<StateUpdates>().0.is_empty());
+
+            if let Some(flag) = disabled_flag {
+                app.signal(SignalReceived {
+                    bus: BusId::System,
+                    matches: [id].into_iter().collect(),
+                    msg: properties_message(
+                        &ObjectPath::from(NM_MAIN_OBJ),
+                        NM,
+                        PropMap::from([(flag.into(), Value::Bool(true))]),
+                    ),
+                });
+                app.flush();
+            } else {
+                let call = pending_call(&app, |kind| matches!(kind, CallType::GetAll));
+                reply_properties(
+                    &mut app,
+                    call,
+                    manager_properties(&[selected.clone(), other.clone()]),
+                );
+            }
+            assert_eq!(app.resource::<StateUpdates>().0, vec![WifiState::Connected]);
+            assert_eq!(app.resource::<APUpdates>().0, vec![expected_ap]);
+        }
+    }
+}
+
+#[test]
 fn manager_properties_changed_respects_precedence_and_refreshes_latest_selected_state() {
     let selected = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/1");
     let other = ObjectPath::from("/org/freedesktop/NetworkManager/Devices/2");

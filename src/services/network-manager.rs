@@ -5,6 +5,10 @@ use std::collections::HashMap;
 #[path = "network-manager/events.rs"]
 mod events;
 
+#[path = "network-manager/trace.rs"]
+mod trace;
+use trace::wifi_trace;
+
 pub use events::{APUpdate, StateUpdate, WifiState};
 
 /// Request a change to NetworkManager's software Wi-Fi switch.
@@ -126,6 +130,7 @@ impl Resource for NMState {}
 pub struct NetworkManagerModule;
 impl Module for NetworkManagerModule {
     fn install(self, app: &mut App) {
+        wifi_trace!("Install: subscribe to NetworkManager and read initial state");
         let (properties_changed, device_added, device_removed, call) = {
             let mut dbus = app.resource_mut::<DBus>();
             let mut bus = dbus.system();
@@ -170,6 +175,7 @@ impl Module for NetworkManagerModule {
 /// PropertiesChanged signal updates [`NMState`] and emits a StateUpdate;
 /// callers must not update the cached state themselves.
 pub fn set_wifi_enabled(app: &mut App, enabled: bool) {
+    wifi_trace!("SetWifiEnabled: request WirelessEnabled={enabled}");
     app.resource_mut::<DBus>()
         .system()
         .object(NM, NM_MAIN_OBJ)
@@ -196,6 +202,7 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                     return;
                 }
             };
+            wifi_trace!("DeviceAdded: {path:?}; discover device");
             let call = app
                 .resource_mut::<DBus>()
                 .system()
@@ -215,6 +222,7 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                 }
             };
 
+            wifi_trace!("DeviceRemoved: {path:?}; remove tracking");
             // remove stored matches for this device
             let matches = match state.wifi_devices.remove(&path) {
                 Some(device) => [
@@ -249,6 +257,10 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
             // TODO: do some sorting here to prefer something that's Active
             if state.current_device.as_ref() == Some(&path) {
                 state.current_device = state.wifi_devices.keys().next().cloned();
+                wifi_trace!(
+                    "DeviceRemoved: selected {path:?} -> {:?}",
+                    state.current_device
+                );
                 if state.networking_enabled
                     && state.wireless_hardware_enabled
                     && state.wireless_enabled
@@ -265,8 +277,16 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                     events::emit_device_state_update(app, device_state);
                     if let Some((ssid, strength)) = access_point {
                         events::emit_ap_update(app, Some(ssid), strength);
+                    } else {
+                        wifi_trace!("DeviceRemoved: replacement has no AP; no APUpdate");
                     }
+                } else {
+                    wifi_trace!(
+                        "DeviceRemoved: no UI refresh (no replacement or manager disabled)"
+                    );
                 }
+            } else {
+                wifi_trace!("DeviceRemoved: selection unchanged; no UI events");
             }
 
             let mut dbus = app.resource_mut::<DBus>();
@@ -284,6 +304,11 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                     return;
                 }
             };
+            let old_flags = (
+                state.networking_enabled,
+                state.wireless_hardware_enabled,
+                state.wireless_enabled,
+            );
             let [
                 networking_enabled,
                 wireless_hardware_enabled,
@@ -309,6 +334,15 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
             if let Some(enabled) = wireless_enabled {
                 state.wireless_enabled = enabled;
             }
+            wifi_trace!(
+                "Manager.PropertiesChanged: networking {} -> {}, hardware {} -> {}, wireless {} -> {}",
+                old_flags.0,
+                state.networking_enabled,
+                old_flags.1,
+                state.wireless_hardware_enabled,
+                old_flags.2,
+                state.wireless_enabled
+            );
 
             if !state.networking_enabled || !state.wireless_hardware_enabled {
                 events::emit_state_update(app, WifiState::Unavailable);
@@ -322,7 +356,19 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                 // Device updates may have been suppressed while a manager flag
                 // was disabled. Publish the latest stored state when enabled.
                 let device_state = device.state;
+                // AP changes and clears are also cached without UI events while
+                // disabled. Replay the full AP snapshot, including None, here:
+                // another AP signal may never arrive to correct stale UI details.
+                let (ssid, strength) = device
+                    .active_ap
+                    .as_ref()
+                    .map(|ap| (Some(ap.ssid.clone()), ap.strength))
+                    .unwrap_or((None, 0));
                 events::emit_device_state_update(app, device_state);
+                // TODO: may cause dot flickering ?
+                events::emit_ap_update(app, ssid, strength);
+            } else {
+                wifi_trace!("Manager.PropertiesChanged: enabled, no selected device; no UI events");
             }
             continue;
         }
@@ -342,6 +388,10 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                 };
                 let path = path.clone();
                 if let Some(device) = state.wifi_devices.get_mut(&path) {
+                    wifi_trace!(
+                        "Device.StateChanged: {path:?} state {} -> {new_state}, reason={_reason}",
+                        device.state
+                    );
                     device.state = new_state;
                     if state.current_device.as_ref() == Some(&path)
                         && state.networking_enabled
@@ -349,7 +399,13 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                         && state.wireless_enabled
                     {
                         events::emit_device_state_update(app, new_state);
+                    } else {
+                        wifi_trace!(
+                            "Device.StateChanged: cache only (not selected or manager disabled)"
+                        );
                     }
+                } else {
+                    wifi_trace!("Device.StateChanged: {path:?} no longer tracked; ignored");
                 }
             }
             Subscription::WirelessProperties(path) => {
@@ -363,23 +419,34 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
 
                 // Invalidation wins over a supplied value. Both invalidation and "/"
                 // clear the AP; absent or malformed properties leave it unchanged.
-                let access_point_path =
-                    if invalidated.iter().any(|name| name == "ActiveAccessPoint") {
-                        None
-                    } else {
-                        let Some(path) =
-                            changed_property::<ObjectPath>(&properties, "ActiveAccessPoint")
-                        else {
-                            continue;
-                        };
-                        (path.as_str() != "/").then_some(path)
+                let access_point_path = if invalidated
+                    .iter()
+                    .any(|name| name == "ActiveAccessPoint")
+                {
+                    None
+                } else {
+                    let Some(path) =
+                        changed_property::<ObjectPath>(&properties, "ActiveAccessPoint")
+                    else {
+                        wifi_trace!(
+                            "Wireless.PropertiesChanged: {path:?} has no valid ActiveAccessPoint update; ignored"
+                        );
+                        continue;
                     };
+                    (path.as_str() != "/").then_some(path)
+                };
 
                 let Some(device) = state.wifi_devices.get(path) else {
+                    wifi_trace!("Wireless.PropertiesChanged: {path:?} no longer tracked; ignored");
                     continue;
                 };
                 let unchanged =
                     device.active_ap.as_ref().map(|ap| &ap.path) == access_point_path.as_ref();
+                wifi_trace!(
+                    "Wireless.PropertiesChanged: {path:?} AP {:?} -> {:?}",
+                    device.active_ap.as_ref().map(|ap| &ap.path),
+                    access_point_path
+                );
                 let path = path.clone();
                 // retain(true) keeps a request. Removing bookkeeping does not cancel
                 // D-Bus calls; on_method_reply will ignore their eventual replies.
@@ -394,6 +461,7 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                     _ => true,
                 });
                 if unchanged {
+                    wifi_trace!("Wireless.PropertiesChanged: AP unchanged; no UI event");
                     // Preserve the existing AP data, match, and property read.
                     continue;
                 }
@@ -410,6 +478,7 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                 // None stays None. A new path gets its own subscription and initial
                 // read, regardless of device state: the AP signal may arrive first.
                 let active_ap = access_point_path.map(|access_point_path| {
+                    wifi_trace!("Wireless.PropertiesChanged: read replacement AP details");
                     let mut dbus = app.resource_mut::<DBus>();
                     let mut bus = dbus.system();
                     let properties_changed =
@@ -450,6 +519,10 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                         // the previous AP. Its property reply will fill in details.
                         let ssid = device.active_ap.as_ref().map(|ap| ap.ssid.clone());
                         events::emit_ap_update(app, ssid, 0);
+                    } else {
+                        wifi_trace!(
+                            "Wireless.PropertiesChanged: cache only (not selected or manager disabled)"
+                        );
                     }
                 }
             }
@@ -473,8 +546,11 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                     .get_mut(&path)
                     .and_then(|device| device.active_ap.as_mut())
                 else {
+                    wifi_trace!("AP.PropertiesChanged: {path:?} has no tracked AP; ignored");
                     continue;
                 };
+                let old_ssid = String::from_utf8_lossy(&ap.ssid).into_owned();
+                let old_strength = ap.strength;
 
                 // Invalidation takes precedence; missing or malformed values preserve the cache.
                 if invalidated.iter().any(|name| name == "Ssid") {
@@ -487,10 +563,19 @@ fn on_signal_received(app: &mut App, event: &SignalReceived) {
                 } else if let Some(strength) = changed_property::<u8>(&properties, "Strength") {
                     ap.strength = strength;
                 }
+                wifi_trace!(
+                    "AP.PropertiesChanged: {path:?} SSID {old_ssid:?} -> {:?}, strength {old_strength} -> {}",
+                    String::from_utf8_lossy(&ap.ssid),
+                    ap.strength
+                );
                 if should_emit {
                     let ssid = ap.ssid.clone();
                     let strength = ap.strength;
                     events::emit_ap_update(app, Some(ssid), strength);
+                } else {
+                    wifi_trace!(
+                        "AP.PropertiesChanged: cache only (not selected or manager disabled)"
+                    );
                 }
             }
         }
@@ -537,12 +622,26 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 }
             };
             let mut state = app.resource_mut::<NMState>();
+            let old_flags = (
+                state.networking_enabled,
+                state.wireless_hardware_enabled,
+                state.wireless_enabled,
+            );
 
             // read necessary state
             state.networking_enabled = unwrap_property(&properties, "NetworkingEnabled");
             state.wireless_hardware_enabled =
                 unwrap_property(&properties, "WirelessHardwareEnabled");
             state.wireless_enabled = unwrap_property(&properties, "WirelessEnabled");
+            wifi_trace!(
+                "Manager.GetAll reply: networking {} -> {}, hardware {} -> {}, wireless {} -> {}",
+                old_flags.0,
+                state.networking_enabled,
+                old_flags.1,
+                state.wireless_hardware_enabled,
+                old_flags.2,
+                state.wireless_enabled
+            );
 
             // Manager restrictions take precedence over any known device state.
             if !state.networking_enabled || !state.wireless_hardware_enabled {
@@ -558,11 +657,23 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 // reply. Publish its latest state now that the flags are known.
                 // Otherwise, leave the initial update to the device reply.
                 let device_state = device.state;
+                // AP discovery may also finish before this reply, while our
+                // default disabled flags suppress its UI events. Replay its
+                // cached details (or clear them) rather than await another signal.
+                let (ssid, strength) = device
+                    .active_ap
+                    .as_ref()
+                    .map(|ap| (Some(ap.ssid.clone()), ap.strength))
+                    .unwrap_or((None, 0));
                 events::emit_device_state_update(app, device_state);
+                events::emit_ap_update(app, ssid, strength);
+            } else {
+                wifi_trace!("Manager.GetAll reply: enabled, waiting for device discovery");
             }
 
             // Request all properties on devices
             let devices: Vec<ObjectPath> = unwrap_property(&properties, "Devices");
+            wifi_trace!("Manager.GetAll reply: discover {} devices", devices.len());
             for path in devices {
                 let call = app
                     .resource_mut::<DBus>()
@@ -594,6 +705,7 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                     .wifi_devices
                     .contains_key(&path)
             {
+                wifi_trace!("Device.GetAll reply: {path:?} ignored (non-Wi-Fi or already tracked)");
                 return;
             }
 
@@ -632,6 +744,10 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
             if state.current_device.is_none() {
                 state.current_device = Some(path.clone());
             }
+            wifi_trace!(
+                "Device.GetAll reply: added {path:?}, state={device_state}, selected={:?}",
+                state.current_device
+            );
 
             // Manager handlers report disabled/unavailable flags. Only the
             // selected device publishes connection state while Wi-Fi is enabled.
@@ -641,10 +757,13 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 && state.wireless_enabled
             {
                 events::emit_device_state_update(app, device_state);
+            } else {
+                wifi_trace!("Device.GetAll reply: cache only (not selected or manager disabled)");
             }
 
             // if we're currently connected, get access point information
             if device_state == nm_device_state::ACTIVE {
+                wifi_trace!("Device.GetAll reply: ACTIVE; read initial AP");
                 let call = app
                     .resource_mut::<DBus>()
                     .system()
@@ -653,6 +772,8 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 app.resource_mut::<NMState>()
                     .pending
                     .insert(call, CallType::ActiveAccessPoint(path));
+            } else {
+                wifi_trace!("Device.GetAll reply: not ACTIVE; wait for AP signals");
             };
         }
         CallType::ActiveAccessPoint(path) => {
@@ -674,6 +795,7 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
             if the state is ACTIVE, so check for that here
             */
             if access_point_path.as_str() == "/" {
+                wifi_trace!("ActiveAccessPoint reply: {path:?} has no AP; no UI event");
                 return;
             }
 
@@ -683,6 +805,7 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 .get(&path)
                 .is_some_and(|device| device.active_ap.is_some())
             {
+                wifi_trace!("ActiveAccessPoint reply: {path:?} already tracks an AP; ignored");
                 return; // make sure access point hasn't changed from beneath us while initialising
             }
 
@@ -694,6 +817,7 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
             );
             let mut state = app.resource_mut::<NMState>();
             let Some(device) = state.wifi_devices.get_mut(&path) else {
+                wifi_trace!("ActiveAccessPoint reply: {path:?} removed; ignored");
                 // this else guard should never run ideally
                 // It could run if device is removed while getting this
                 // information
@@ -710,6 +834,9 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 strength: 0,
                 properties_changed: Some(properties_changed),
             });
+            wifi_trace!(
+                "ActiveAccessPoint reply: {path:?} AP None -> {access_point_path:?}; read SSID/strength"
+            );
             state.subscriptions.insert(
                 properties_changed,
                 Subscription::AccessPointProperties(path.clone()),
@@ -747,21 +874,33 @@ fn on_method_reply(app: &mut App, event: &MethodReply) {
                 && state.wireless_hardware_enabled
                 && state.wireless_enabled;
             let Some(device) = state.wifi_devices.get_mut(&device_path) else {
+                wifi_trace!("AP.GetAll reply: {device_path:?} removed; ignored");
                 return;
             };
             let Some(access_point) = device.active_ap.as_mut() else {
+                wifi_trace!("AP.GetAll reply: {device_path:?} has no AP; ignored");
                 return;
             };
             if access_point.path != access_point_path {
+                wifi_trace!("AP.GetAll reply: {device_path:?} AP changed; ignored");
                 return; // if access point has changed during this point
             }
 
+            let old_ssid = String::from_utf8_lossy(&access_point.ssid).into_owned();
+            let old_strength = access_point.strength;
             access_point.ssid = unwrap_property(&properties, "Ssid");
             access_point.strength = unwrap_property(&properties, "Strength");
+            wifi_trace!(
+                "AP.GetAll reply: {device_path:?} SSID {old_ssid:?} -> {:?}, strength {old_strength} -> {}",
+                String::from_utf8_lossy(&access_point.ssid),
+                access_point.strength
+            );
             if should_emit {
                 let ssid = access_point.ssid.clone();
                 let strength = access_point.strength;
                 events::emit_ap_update(app, Some(ssid), strength);
+            } else {
+                wifi_trace!("AP.GetAll reply: cache only (not selected or manager disabled)");
             }
         }
     }
