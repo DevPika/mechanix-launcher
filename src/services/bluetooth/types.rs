@@ -1,25 +1,19 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use mecha_wayland::prelude::*;
 
 use super::interface::{ADAPTER, DEVICE};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum BluetoothState {
-    Connected(usize),
-    #[default]
+    /// `name` is the device alias when exactly one device is connected.
+    Connected {
+        count: usize,
+        name: Option<String>,
+    },
     On,
+    #[default]
     Off,
-    #[allow(dead_code)]
-    Disconnected,
-}
-
-impl BluetoothState {
-    #[inline]
-    #[allow(dead_code)]
-    pub fn is_visible(&self) -> bool {
-        !matches!(self, Self::Off)
-    }
 }
 
 pub(super) struct Matches {
@@ -41,10 +35,18 @@ impl Resource for BluetoothStatus {}
 
 pub(super) type ManagedObjects = HashMap<ObjectPath, HashMap<String, PropMap>>;
 
+/// Known BlueZ device; aliases are kept for disconnected devices so a later
+/// `Connected` signal, which carries no name, can still be labelled.
+#[derive(Debug, Default)]
+pub(super) struct Device {
+    pub(super) alias: String,
+    pub(super) connected: bool,
+}
+
 #[derive(Default)]
 pub(super) struct BluetoothObservation {
     pub(super) adapters: HashMap<ObjectPath, bool>,
-    pub(super) connected_devices: HashSet<ObjectPath>,
+    pub(super) devices: HashMap<ObjectPath, Device>,
 }
 
 impl BluetoothObservation {
@@ -67,12 +69,24 @@ impl BluetoothObservation {
             );
         }
         if let Some(props) = interfaces.get(DEVICE) {
-            if props.get_as::<bool>("Connected").and_then(Result::ok) == Some(true) {
-                self.connected_devices.insert(path);
-            } else {
-                self.connected_devices.remove(&path);
-            }
+            self.devices.insert(
+                path,
+                Device {
+                    alias: props
+                        .get_as::<String>("Alias")
+                        .and_then(Result::ok)
+                        .unwrap_or_default(),
+                    connected: props.get_as::<bool>("Connected").and_then(Result::ok) == Some(true),
+                },
+            );
         }
+    }
+
+    pub(super) fn connected_count(&self) -> usize {
+        self.devices
+            .values()
+            .filter(|device| device.connected)
+            .count()
     }
 
     pub(super) fn apply_change(&mut self, change: BluetoothChange) -> bool {
@@ -85,26 +99,30 @@ impl BluetoothObservation {
                             self.adapters.remove(&path);
                         }
                         DEVICE => {
-                            self.connected_devices.remove(&path);
+                            self.devices.remove(&path);
                         }
                         _ => {}
                     }
                 }
             }
-            BluetoothChange::Property(path, interface, Some(value)) => match interface {
-                ADAPTER => {
-                    self.adapters.insert(path, value);
-                }
-                DEVICE => {
-                    if value {
-                        self.connected_devices.insert(path);
-                    } else {
-                        self.connected_devices.remove(&path);
+            BluetoothChange::Properties(path, props) => {
+                for prop in props {
+                    match prop {
+                        PropChange::Powered(Some(powered)) => {
+                            self.adapters.insert(path.clone(), powered);
+                        }
+                        PropChange::Connected(Some(connected)) => {
+                            self.devices.entry(path.clone()).or_default().connected = connected;
+                        }
+                        PropChange::Alias(Some(alias)) => {
+                            self.devices.entry(path.clone()).or_default().alias = alias;
+                        }
+                        PropChange::Powered(None)
+                        | PropChange::Connected(None)
+                        | PropChange::Alias(None) => return false,
                     }
                 }
-                _ => {}
-            },
-            BluetoothChange::Property(_, _, None) => return false,
+            }
         }
         true
     }
@@ -113,11 +131,17 @@ impl BluetoothObservation {
         if !self.adapters.values().any(|&powered| powered) {
             BluetoothState::Off
         } else {
-            let count = self.connected_devices.len();
-            if count > 0 {
-                BluetoothState::Connected(count)
-            } else {
-                BluetoothState::On
+            let mut connected = self.devices.values().filter(|device| device.connected);
+            match (connected.next(), connected.next()) {
+                (None, _) => BluetoothState::On,
+                (Some(device), None) => BluetoothState::Connected {
+                    count: 1,
+                    name: (!device.alias.is_empty()).then(|| device.alias.clone()),
+                },
+                (Some(_), Some(_)) => BluetoothState::Connected {
+                    count: self.connected_count(),
+                    name: None,
+                },
             }
         }
     }
@@ -126,5 +150,13 @@ impl BluetoothObservation {
 pub(super) enum BluetoothChange {
     Added(ObjectPath, HashMap<String, PropMap>),
     Removed(ObjectPath, Vec<String>),
-    Property(ObjectPath, &'static str, Option<bool>),
+    Properties(ObjectPath, Vec<PropChange>),
+}
+
+/// A watched property; `None` means BlueZ invalidated it and a snapshot is required.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum PropChange {
+    Powered(Option<bool>),
+    Connected(Option<bool>),
+    Alias(Option<String>),
 }

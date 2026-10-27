@@ -1,10 +1,17 @@
 use super::BluetoothState;
 use super::backend::decode_change;
 use super::interface::{ADAPTER, DEVICE, OBJECT_MANAGER};
-use super::types::{BluetoothObservation, ManagedObjects};
+use super::types::{BluetoothObservation, Device, ManagedObjects};
 use mecha_wayland::dbus::Value;
 use mecha_wayland::prelude::*;
 use std::collections::HashMap;
+
+fn connected(count: usize, name: Option<&str>) -> BluetoothState {
+    BluetoothState::Connected {
+        count,
+        name: name.map(str::to_string),
+    }
+}
 
 #[test]
 fn snapshot_and_property_signals() {
@@ -28,7 +35,7 @@ fn snapshot_and_property_signals() {
     ]);
     let mut observed = BluetoothObservation::from_managed_objects(objects);
     assert_eq!(observed.state(), BluetoothState::Off);
-    assert!(observed.connected_devices.is_empty());
+    assert_eq!(observed.connected_count(), 0);
 
     let property = |path: ObjectPath, interface: &str, name: &str, value: bool| {
         Message::signal(path, "org.freedesktop.DBus.Properties", "PropertiesChanged").with_body(&(
@@ -44,14 +51,14 @@ fn snapshot_and_property_signals() {
     assert!(observed.apply_change(
         decode_change(&property(device.clone(), DEVICE, "Connected", true)).unwrap()
     ));
-    assert_eq!(observed.state(), BluetoothState::Connected(1));
-    assert_eq!(observed.connected_devices.len(), 1);
+    assert_eq!(observed.state(), connected(1, None));
+    assert_eq!(observed.connected_count(), 1);
     assert!(
         observed
             .apply_change(decode_change(&property(device, DEVICE, "Connected", false)).unwrap())
     );
     assert_eq!(observed.state(), BluetoothState::On);
-    assert!(observed.connected_devices.is_empty());
+    assert_eq!(observed.connected_count(), 0);
     assert!(decode_change(&property(adapter, ADAPTER, "Alias", true)).is_none());
 }
 
@@ -61,7 +68,13 @@ fn object_manager_removal_uses_body_path() {
     let device = ObjectPath::new("/org/bluez/hci0/dev_00_11_22_33_44_55").unwrap();
     let mut observed = BluetoothObservation::default();
     observed.adapters.insert(adapter.clone(), true);
-    observed.connected_devices.insert(device.clone());
+    observed.devices.insert(
+        device.clone(),
+        Device {
+            alias: "Headphones".into(),
+            connected: true,
+        },
+    );
 
     let removed = |path: ObjectPath, interface: &str| {
         Message::signal("/", OBJECT_MANAGER, "InterfacesRemoved")
@@ -93,12 +106,9 @@ fn added_devices_keep_connected_until_last_one_is_removed() {
             )]),
         ));
         assert!(observed.apply_change(decode_change(&added).unwrap()));
-        assert_eq!(observed.state(), BluetoothState::Connected(i + 1));
+        assert_eq!(observed.state(), connected(i + 1, None));
     }
-    for (path, expected) in [
-        (first, BluetoothState::Connected(1)),
-        (second, BluetoothState::On),
-    ] {
+    for (path, expected) in [(first, connected(1, None)), (second, BluetoothState::On)] {
         let removed = Message::signal("/", OBJECT_MANAGER, "InterfacesRemoved")
             .with_body(&(path, vec![DEVICE.to_string()]));
         assert!(observed.apply_change(decode_change(&removed).unwrap()));
@@ -268,4 +278,105 @@ fn failed_snapshot_preserves_last_observed_state() {
         app.resource::<super::BluetoothStatus>().state,
         BluetoothState::Off
     );
+}
+
+fn alias_signal(path: ObjectPath, alias: &str) -> Message {
+    Message::signal(path, "org.freedesktop.DBus.Properties", "PropertiesChanged").with_body(&(
+        DEVICE,
+        PropMap::from([("Alias".into(), Value::Str(alias.into()))]),
+        Vec::<String>::new(),
+    ))
+}
+
+fn connected_signal(path: ObjectPath, connected: bool) -> Message {
+    Message::signal(path, "org.freedesktop.DBus.Properties", "PropertiesChanged").with_body(&(
+        DEVICE,
+        PropMap::from([("Connected".into(), Value::Bool(connected))]),
+        Vec::<String>::new(),
+    ))
+}
+
+fn device_props(alias: &str, connected: bool) -> HashMap<String, PropMap> {
+    HashMap::from([(
+        DEVICE.into(),
+        PropMap::from([
+            ("Alias".into(), Value::Str(alias.into())),
+            ("Connected".into(), Value::Bool(connected)),
+        ]),
+    )])
+}
+
+#[test]
+fn single_connected_device_reports_its_alias() {
+    let adapter = ObjectPath::new("/org/bluez/hci0").unwrap();
+    let first = ObjectPath::new("/org/bluez/hci0/dev_00_11_22_33_44_55").unwrap();
+    let second = ObjectPath::new("/org/bluez/hci0/dev_00_11_22_33_44_66").unwrap();
+    let mut observed = BluetoothObservation::from_managed_objects(ManagedObjects::from([
+        (
+            adapter,
+            HashMap::from([(
+                ADAPTER.into(),
+                PropMap::from([("Powered".into(), Value::Bool(true))]),
+            )]),
+        ),
+        (first.clone(), device_props("Headphones", true)),
+        (second.clone(), device_props("Keyboard", false)),
+    ]));
+    assert_eq!(observed.state(), connected(1, Some("Headphones")));
+
+    // The Connected signal carries no name; the alias comes from the snapshot.
+    assert!(observed.apply_change(decode_change(&connected_signal(second.clone(), true)).unwrap()));
+    assert_eq!(observed.state(), connected(2, None));
+
+    assert!(observed.apply_change(decode_change(&connected_signal(first, false)).unwrap()));
+    assert_eq!(observed.state(), connected(1, Some("Keyboard")));
+
+    assert!(observed.apply_change(decode_change(&alias_signal(second, "Desk Keyboard")).unwrap()));
+    assert_eq!(observed.state(), connected(1, Some("Desk Keyboard")));
+}
+
+#[test]
+fn empty_alias_falls_back_to_no_name() {
+    let adapter = ObjectPath::new("/org/bluez/hci0").unwrap();
+    let device = ObjectPath::new("/org/bluez/hci0/dev_00_11_22_33_44_55").unwrap();
+    let mut observed = BluetoothObservation::default();
+    observed.adapters.insert(adapter, true);
+    assert!(observed.apply_change(decode_change(&connected_signal(device, true)).unwrap()));
+    assert_eq!(observed.state(), connected(1, None));
+}
+
+#[test]
+fn connected_and_alias_in_one_signal_are_both_applied() {
+    let adapter = ObjectPath::new("/org/bluez/hci0").unwrap();
+    let device = ObjectPath::new("/org/bluez/hci0/dev_00_11_22_33_44_55").unwrap();
+    let mut observed = BluetoothObservation::default();
+    observed.adapters.insert(adapter, true);
+    let msg = Message::signal(
+        device,
+        "org.freedesktop.DBus.Properties",
+        "PropertiesChanged",
+    )
+    .with_body(&(
+        DEVICE,
+        PropMap::from([
+            ("Connected".into(), Value::Bool(true)),
+            ("Alias".into(), Value::Str("Speaker".into())),
+        ]),
+        Vec::<String>::new(),
+    ));
+    assert!(observed.apply_change(decode_change(&msg).unwrap()));
+    assert_eq!(observed.state(), connected(1, Some("Speaker")));
+}
+
+#[test]
+fn invalidated_alias_requests_snapshot() {
+    let device = ObjectPath::new("/org/bluez/hci0/dev_00_11_22_33_44_55").unwrap();
+    let mut observed = BluetoothObservation::default();
+    let msg = Message::signal(
+        device,
+        "org.freedesktop.DBus.Properties",
+        "PropertiesChanged",
+    )
+    .with_body(&(DEVICE, PropMap::new(), vec!["Alias".to_string()]));
+    assert!(!observed.apply_change(decode_change(&msg).unwrap()));
 }

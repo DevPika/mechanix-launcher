@@ -3,10 +3,12 @@ use std::collections::HashMap;
 
 use super::BluetoothStatus;
 use super::interface::{ADAPTER, BLUEZ, DEVICE, OBJECT_MANAGER};
-use super::types::{BluetoothChange, BluetoothObservation, BluetoothState, ManagedObjects};
+use super::types::{
+    BluetoothChange, BluetoothObservation, BluetoothState, ManagedObjects, PropChange,
+};
 use mecha_wayland::prelude::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BluetoothStateChanged {
     pub state: BluetoothState,
 }
@@ -19,6 +21,20 @@ impl Signal for ToggleBluetooth {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SetBluetoothPowered(pub bool);
 impl Signal for SetBluetoothPowered {}
+
+fn decode_prop<T: mecha_wayland::dbus::Decode>(
+    props: &PropMap,
+    invalidated: &[String],
+    key: &str,
+) -> Option<Option<T>> {
+    if invalidated.iter().any(|name| name == key) {
+        Some(None)
+    } else if props.contains_key(key) {
+        Some(props.get_as::<T>(key).and_then(Result::ok))
+    } else {
+        None
+    }
+}
 
 pub(super) fn decode_change(msg: &Message) -> Option<BluetoothChange> {
     match msg.member()?.as_str() {
@@ -36,24 +52,27 @@ pub(super) fn decode_change(msg: &Message) -> Option<BluetoothChange> {
         }
         "PropertiesChanged" => {
             let (interface, props, invalidated) = PropertiesChanged::parse(msg).ok()?;
-            let (interface, key) = match interface.as_str() {
-                ADAPTER => (ADAPTER, "Powered"),
-                DEVICE => (DEVICE, "Connected"),
+            let mut changes = Vec::new();
+            match interface.as_str() {
+                ADAPTER => {
+                    if let Some(powered) = decode_prop(&props, &invalidated, "Powered") {
+                        changes.push(PropChange::Powered(powered));
+                    }
+                }
+                DEVICE => {
+                    if let Some(connected) = decode_prop(&props, &invalidated, "Connected") {
+                        changes.push(PropChange::Connected(connected));
+                    }
+                    if let Some(alias) = decode_prop(&props, &invalidated, "Alias") {
+                        changes.push(PropChange::Alias(alias));
+                    }
+                }
                 _ => return None,
-            };
-            if !props.contains_key(key) && !invalidated.iter().any(|name| name == key) {
+            }
+            if changes.is_empty() {
                 return None;
             }
-            let value = if invalidated.iter().any(|name| name == key) {
-                None
-            } else {
-                props.get_as::<bool>(key).and_then(Result::ok)
-            };
-            Some(BluetoothChange::Property(
-                msg.path()?.clone(),
-                interface,
-                value,
-            ))
+            Some(BluetoothChange::Properties(msg.path()?.clone(), changes))
         }
         _ => None,
     }
@@ -83,7 +102,7 @@ fn publish_state(app: &mut App, state: BluetoothState) {
     //     app.resource::<BluetoothStatus>().state,
     //     state
     // );
-    app.resource_mut::<BluetoothStatus>().state = state;
+    app.resource_mut::<BluetoothStatus>().state = state.clone();
     app.emit(
         BluetoothStateChanged { state },
         app.descendants(app.root()).collect::<Vec<_>>(),

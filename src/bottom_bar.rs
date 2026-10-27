@@ -108,8 +108,30 @@ mod tests {
 
         for (state, label, is_on) in [
             (BluetoothState::On, "On", true),
-            (BluetoothState::Connected(1), "Connected", true),
-            (BluetoothState::Connected(2), "2 devices", true),
+            (
+                BluetoothState::Connected {
+                    count: 1,
+                    name: Some("Headphones".into()),
+                },
+                "Hea...",
+                true,
+            ),
+            (
+                BluetoothState::Connected {
+                    count: 1,
+                    name: None,
+                },
+                "Connected",
+                true,
+            ),
+            (
+                BluetoothState::Connected {
+                    count: 2,
+                    name: None,
+                },
+                "2 devices",
+                true,
+            ),
             (BluetoothState::Off, "Off", false),
         ] {
             app.emit(
