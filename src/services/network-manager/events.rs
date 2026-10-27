@@ -1,6 +1,7 @@
 use mecha_wayland::prelude::*;
 
 use super::nm_device_state;
+use super::trace::wifi_trace;
 
 /// Wi-Fi availability and connection status for the selected device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +40,7 @@ impl Event for APUpdate {}
 
 /// Map a NetworkManager device state and broadcast it to the UI.
 /// The caller checks device selection and manager flags before emitting.
+#[track_caller]
 pub(super) fn emit_device_state_update(app: &mut App, device_state: u32) {
     let state = match device_state {
         nm_device_state::UNMANAGED | nm_device_state::UNAVAILABLE => WifiState::Unavailable,
@@ -58,7 +60,9 @@ pub(super) fn emit_device_state_update(app: &mut App, device_state: u32) {
 
 /// Broadcast a selected-device state update to the UI.
 /// The caller decides when to emit, including when the selected device changes.
+#[track_caller]
 pub(super) fn emit_state_update(app: &mut App, state: WifiState) {
+    wifi_trace!("-> UI StateUpdate: {state:?}");
     app.emit(
         StateUpdate { state },
         app.descendants(app.root()).collect::<Vec<_>>(),
@@ -68,8 +72,13 @@ pub(super) fn emit_state_update(app: &mut App, state: WifiState) {
 /// Broadcast a complete AP update. Pass None to clear AP information.
 /// These helpers emit every call so a device switch can refresh both UI events
 /// even when the newly selected device has the same values as the previous one.
+#[track_caller]
 pub(super) fn emit_ap_update(app: &mut App, ssid: Option<Vec<u8>>, strength: u8) {
     let strength = if ssid.is_some() { strength } else { 0 };
+    wifi_trace!(
+        "-> UI APUpdate: SSID={:?}, strength={strength}",
+        ssid.as_deref().map(String::from_utf8_lossy)
+    );
     app.emit(
         APUpdate { ssid, strength },
         app.descendants(app.root()).collect::<Vec<_>>(),
