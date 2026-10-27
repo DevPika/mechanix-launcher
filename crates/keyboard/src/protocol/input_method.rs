@@ -1,14 +1,16 @@
 //! `zwp_input_method_v2` — the input-method-v2 protocol client.
 //!
-//! `InputMethodState` is a `Resource`; the module binds `ZwpInputMethodManagerV2`
-//! conditionally from `Globals`, creates the `ZwpInputMethodV2` object, and
-//! registers a system for `ZwpInputMethodV2Event`.
+//! [`InputMethodState`] is a `Resource`; the module binds
+//! `ZwpInputMethodManagerV2` conditionally from `Globals`, creates the
+//! `ZwpInputMethodV2` object, and handles `ZwpInputMethodV2Event`.
 //!
 //! Inbound state is double-buffered: `activate`/`deactivate`/`content_type`
-//! events fill a pending context that is applied on `done`. Surrounding text
-//! and change cause are not tracked yet.
+//! events fill a pending context applied on `done`. Surrounding text and change
+//! cause are not tracked yet. Outbound text commits go through [`commit_text`].
 
 use mecha_wayland::prelude::*;
+
+use crate::visibility::KeyboardVisibilityExt;
 
 /// The text-input context the compositor reports for the focused field.
 ///
@@ -62,80 +64,20 @@ impl InputMethodState {
     }
 }
 
-// ── keyboard surface visibility ──────────────────────────────────────────
-//
-// The keyboard surface's shown/hidden state lives in a `Resource` so that
-// both the inbound IM2 state machine (`activate`/`deactivate` applied at
-// `done`) and the debug visibility bar flip the *same* flag through the
-// *same* setter. A `Signal` (`KeyboardVisibilityChanged`) is turned into a
-// broadcast `Event` (`ApplyKeyboardVisibility`) by a system, which the
-// `KeyboardUI` widget subscribes to in order to set `Display::Hidden`/`Flex` on
-// the keyboard subtree. This mirrors the `theme` crate's `ThemeChanged` →
-// `ApplyTheme` bridge — the only generic resource→widget path the app core
-// exposes — so the bar and activate/deactivate share one mechanism (DRY).
-
-/// The keyboard surface's shown/hidden state. Driven by IM2
-/// `activate`/`deactivate` (via `Done`) and force-toggled by the debug
-/// visibility bar; both write through [`KeyboardVisibilityExt`].
-#[derive(Debug, Clone, Copy, Default)]
-pub struct KeyboardVisibility {
-    pub visible: bool,
-}
-impl Resource for KeyboardVisibility {}
-
-/// `Signal`: the visibility flag changed → fan out `ApplyKeyboardVisibility`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct KeyboardVisibilityChanged;
-impl Signal for KeyboardVisibilityChanged {}
-
-/// `Event`: re-apply the current visibility to the surface. Broadcast to the
-/// root and every descendant; the `KeyboardUI` widget handles it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ApplyKeyboardVisibility;
-impl Event for ApplyKeyboardVisibility {}
-
-/// The single visibility setter (DRY): IM2 `Done` and the debug bar both go
-/// through here. Implemented for `App` (systems) and `Context` (widget
-/// handlers) so the same call reads at every site — mirroring `theme`'s
-/// `AppThemeExt` / `ContextThemeExt` pair.
-pub trait KeyboardVisibilityExt {
-    /// The current visibility flag.
-    fn keyboard_visible(&self) -> bool;
-    /// Set the flag and signal the change (no-op if already `visible`).
-    fn set_keyboard_visibility(&mut self, visible: bool);
-    /// Flip the current visibility. Default method: every implementor gets it.
-    fn toggle_keyboard_visibility(&mut self) {
-        let next = !self.keyboard_visible();
-        self.set_keyboard_visibility(next);
+/// Commit `text` through `zwp_input_method_v2`: a `commit_string` followed by
+/// `commit(serial)`. Returns `true` if sent (IM bound and active), `false` if
+/// the caller should fall back to the virtual-keyboard transport.
+pub(crate) fn commit_text(state: &InputMethodState, wl: &mut Wayland, text: &str) -> bool {
+    if !state.should_commit() {
+        return false;
     }
-}
-
-impl KeyboardVisibilityExt for App {
-    fn keyboard_visible(&self) -> bool {
-        self.resource::<KeyboardVisibility>().visible
-    }
-    fn set_keyboard_visibility(&mut self, visible: bool) {
-        if self.resource::<KeyboardVisibility>().visible == visible {
-            return;
-        }
-        self.resource_mut::<KeyboardVisibility>().visible = visible;
-        self.signal(KeyboardVisibilityChanged);
-        tracing::info!(visible, "keyboard visibility");
-    }
-}
-
-impl<W: Widget> KeyboardVisibilityExt for Context<'_, W> {
-    fn keyboard_visible(&self) -> bool {
-        self.resource::<KeyboardVisibility>().visible
-    }
-    fn set_keyboard_visibility(&mut self, visible: bool) {
-        if self.resource::<KeyboardVisibility>().visible == visible {
-            return;
-        }
-        self.resource_mut::<KeyboardVisibility>().visible = visible;
-        self.signal(KeyboardVisibilityChanged);
-        tracing::info!(visible, "keyboard visibility");
-    }
+    let Some(im) = state.input_method else {
+        return false;
+    };
+    let serial = state.serial;
+    im.commit_string(&mut *wl, text);
+    im.commit(&mut *wl, serial);
+    true
 }
 
 /// `Signal`: a text field gained focus, or changed purpose while focused.
@@ -146,15 +88,6 @@ pub struct TextInputFocused {
 }
 impl Signal for TextInputFocused {}
 
-/// System: on `KeyboardVisibilityChanged`, broadcast `ApplyKeyboardVisibility`
-/// to the root and every descendant so the `KeyboardUI` handler re-applies
-/// `Display`. Mirrors `theme::on_theme_changed`.
-fn on_keyboard_visibility_changed(app: &mut App, _: &KeyboardVisibilityChanged) {
-    let mut targets = vec![app.root()];
-    targets.extend(app.tree().descendants(app.root()));
-    app.emit(ApplyKeyboardVisibility, targets);
-}
-
 /// Module that binds the input-method manager global, creates the IM object,
 /// and handles `ZwpInputMethodV2Event`. Install after `WaylandModule`.
 pub struct InputMethodModule;
@@ -164,8 +97,7 @@ impl Module for InputMethodModule {
         app.insert_resource(InputMethodState::default());
         // Keyboard surface visibility — starts hidden; IM2 `activate` and the
         // debug visibility bar flip it through `KeyboardVisibilityExt`.
-        app.insert_resource(KeyboardVisibility { visible: false });
-        app.system(on_keyboard_visibility_changed);
+        crate::visibility::install(app);
         init(app);
         app.system(on_input_method_event);
     }
@@ -208,7 +140,8 @@ fn init(app: &mut App) {
 
 /// Handle the inbound double-buffered state machine: events fill `pending`,
 /// `done` applies it to `current` and bumps the serial, `unavailable` marks the
-/// object inert.
+/// object inert. An activate/deactivate also flips the keyboard surface
+/// visibility through `KeyboardVisibilityExt`.
 fn on_input_method_event(app: &mut App, event: &ZwpInputMethodV2Event) {
     // Both are computed inside the `InputMethodState` borrow and acted on
     // after the guard drops, since signalling needs `&mut App`.
@@ -274,8 +207,3 @@ fn on_input_method_event(app: &mut App, event: &ZwpInputMethodV2Event) {
         app.set_keyboard_visibility(visible);
     }
 }
-
-// ── outbound edits ────────────────────────────────────────────────────────
-
-// Text commit is done by `im_commit_text` in keyboard.rs, which sends
-// `commit_string` + `commit(serial)` over Wayland.

@@ -1,28 +1,32 @@
+//! Bundled SVG icons, rasterized into the atlas at load and keyed by the name
+//! layouts refer to them by.
+
 use mecha_wayland::prelude::*;
 use std::collections::HashMap;
 
-macro_rules! icon {
+macro_rules! include_icon {
     ($name:literal) => {
         (
             $name,
-            include_bytes!(concat!("../resources/icons/", $name, ".svg")),
+            include_bytes!(concat!("../../resources/icons/", $name, ".svg")),
         )
     };
 }
 
 /// Every bundled SVG icon, keyed by the name layouts refer to it by.
 const BUNDLED: &[(&str, &[u8])] = &[
-    icon!("edit-clear-symbolic"),
-    icon!("face-smile-symbolic"),
-    icon!("go-down-symbolic"),
-    icon!("go-next-symbolic"),
-    icon!("go-previous-symbolic"),
-    icon!("go-up-symbolic"),
-    icon!("key-enter-symbolic"),
-    icon!("key-shift-symbolic"),
-    icon!("preferences-system-symbolic"),
+    include_icon!("edit-clear-symbolic"),
+    include_icon!("face-smile-symbolic"),
+    include_icon!("go-down-symbolic"),
+    include_icon!("go-next-symbolic"),
+    include_icon!("go-previous-symbolic"),
+    include_icon!("go-up-symbolic"),
+    include_icon!("key-enter-symbolic"),
+    include_icon!("key-shift-symbolic"),
+    include_icon!("preferences-system-symbolic"),
 ];
 
+/// The rasterized icon sprites, looked up by the name a layout uses.
 #[derive(Debug)]
 pub struct Icons {
     icons: HashMap<String, SpriteId>,
@@ -31,6 +35,7 @@ pub struct Icons {
 impl Resource for Icons {}
 
 impl Icons {
+    /// Rasterize every bundled icon at `size` and insert it into the atlas.
     pub fn load(atlas: &mut Atlas, size: u32) -> Self {
         let mut icons: HashMap<String, SpriteId> = HashMap::new();
         for &(name, bytes) in BUNDLED {
@@ -42,6 +47,7 @@ impl Icons {
         Self { icons }
     }
 
+    /// The sprite for a named icon, or `None` if no bundled icon has that name.
     pub fn get(&self, name: &str) -> Option<SpriteId> {
         self.icons.get(name).copied()
     }

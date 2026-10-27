@@ -1,10 +1,10 @@
 //! `zwp_virtual_keyboard_v1` — the virtual-keyboard-v1 protocol client.
 //!
-//! `VirtualKeyboardState` is a `Resource`; the module binds the
+//! [`VirtualKeyboardState`] is a `Resource`; the module binds the
 //! `ZwpVirtualKeyboardManagerV1` global conditionally from `Globals` and creates
 //! the `ZwpVirtualKeyboardV1` object once a seat is available. It also handles
-//! keymap compilation, keysym→keystroke indexing and memfd keymap file creation.
-//! Keycode emission lives in `vk_emit_keysym` in `keyboard.rs`.
+//! keymap compilation, keysym→keystroke indexing and memfd keymap file
+//! creation. Keycode emission goes through [`emit_keysym`].
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -31,7 +31,8 @@ pub struct Keystroke {
 }
 
 /// All state the virtual-keyboard-v1 client owns. Lives on the app as a
-/// `Resource`, reachable from `Context` handlers via `ctx.resource_mut::<VirtualKeyboardState>()`.
+/// `Resource`, reachable from `Context` handlers via
+/// `ctx.resource_mut::<VirtualKeyboardState>()`.
 pub struct VirtualKeyboardState {
     /// The `ZwpVirtualKeyboardV1` object; `None` until both the manager and a
     /// seat are available.
@@ -59,9 +60,51 @@ impl Default for VirtualKeyboardState {
 
 impl Resource for VirtualKeyboardState {}
 
+/// Send one keysym as a keycode down+up via `zwp_virtual_keyboard_v1`, holding
+/// `latched_mask` (plus the keystroke's own modifiers) around the press and
+/// clearing them after. No-ops (with a warning) if the VK object or the keysym
+/// isn't indexed yet.
+pub(crate) fn emit_keysym(
+    state: &VirtualKeyboardState,
+    wl: &mut Wayland,
+    ks: Keysym,
+    latched_mask: u32,
+) {
+    let name = xkbcommon::xkb::keysym_get_name(ks);
+    let Some(vkbd) = state.virtual_keyboard else {
+        tracing::warn!(keysym = %name, "virtual keyboard not ready; key dropped");
+        return;
+    };
+    let Some(stroke) = state.keycodes.get(&ks).copied() else {
+        tracing::warn!(keysym = %name, "keysym absent from keymap; not typed");
+        return;
+    };
+    let mods = stroke.mods | latched_mask;
+    let time = (Instant::now() - state.start_time).as_millis() as u32;
+    if mods != 0 {
+        vkbd.modifiers(&mut *wl, mods, 0, 0, 0);
+    }
+    vkbd.key(
+        &mut *wl,
+        time,
+        stroke.code,
+        u32::from(WlKeyboardKeyState::Pressed),
+    );
+    vkbd.key(
+        &mut *wl,
+        time,
+        stroke.code,
+        u32::from(WlKeyboardKeyState::Released),
+    );
+    if mods != 0 {
+        vkbd.modifiers(&mut *wl, 0, 0, 0, 0);
+    }
+    tracing::info!(keysym = %name, code = stroke.code, mods, "typed");
+}
+
 /// Module that binds the virtual-keyboard manager global and creates the VK
-/// object. Install after `WaylandModule` (which provides `Globals` and `Wayland`)
-/// and after the seat is bound.
+/// object. Install after `WaylandModule` (which provides `Globals` and
+/// `Wayland`) and after the seat is bound.
 pub struct VirtualKeyboardModule;
 
 impl Module for VirtualKeyboardModule {
@@ -142,8 +185,8 @@ fn init(app: &mut App) {
     vk.mod_masks = mod_masks;
 }
 
-/// Build the `keysym → Keystroke` map from a compiled keymap's base (level 0) and
-/// shifted (level 1) levels.
+/// Build the `keysym → Keystroke` map from a compiled keymap's base (level 0)
+/// and shifted (level 1) levels.
 fn scan_keycodes(keymap: &Keymap) -> HashMap<Keysym, Keystroke> {
     let shift = 1u32 << keymap.mod_get_index(MOD_NAME_SHIFT);
     let mut map = HashMap::new();
@@ -178,9 +221,6 @@ pub fn keysym_text(ks: Keysym) -> Option<String> {
     Some(ch.to_string())
 }
 
-// Key emission lives in keyboard.rs: `vk_emit_keysym` sends keycodes through this
-// state's virtual keyboard, and `im_commit_text` is the input-method path.
-
 // ── keymap memfd ───────────────────────────────────────────────────────────
 
 struct KeymapWithFd {
@@ -188,7 +228,7 @@ struct KeymapWithFd {
     size: u32,
 }
 
-/// Builds a sealed memfd holding `text` as a NUL-terminated buffer, ready to
+/// Build a sealed memfd holding `text` as a NUL-terminated buffer, ready to
 /// send as `set_keymap`'s fd + size.
 ///
 /// The memfd is sealed against shrinking, growing and writing, so the

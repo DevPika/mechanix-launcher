@@ -4,8 +4,7 @@
 //! key that types a digit uses `number` and any other key uses `normal`. An
 //! armed modifier uses `latched`.
 
-use crate::color_role;
-use crate::font::Font;
+use super::tokens::{self, Font};
 use mecha_wayland::prelude::ColorRole;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -15,6 +14,7 @@ pub const NORMAL: &str = "normal";
 pub const NUMBER: &str = "number";
 pub const LATCHED: &str = "latched";
 
+/// One named style as it appears in `layout.yaml`.
 #[derive(Debug, Default, Deserialize)]
 pub struct KeyStyleSpec {
     background: Option<String>,
@@ -24,7 +24,7 @@ pub struct KeyStyleSpec {
     font_size: Option<u16>,
 }
 
-/// Unset fields fall back to the keyboard's defaults.
+/// A resolved style: unset fields fall back to the keyboard's defaults.
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct KeyStyle {
     pub background: Option<ColorRole>,
@@ -33,6 +33,7 @@ pub struct KeyStyle {
     pub font_size: Option<u16>,
 }
 
+/// Which state a key is drawn in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyState {
     Normal,
@@ -40,12 +41,13 @@ pub enum KeyState {
 }
 
 impl KeyState {
+    /// [`Latched`](Self::Latched) when `armed`, else [`Normal`](Self::Normal).
     pub fn latched_if(armed: bool) -> Self {
         if armed { Self::Latched } else { Self::Normal }
     }
 }
 
-/// Every style a key can be drawn with, one per `KeyState`.
+/// Every state a key can be drawn with — one [`KeyStyle`] per [`KeyState`].
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct KeyLook {
     normal: KeyStyle,
@@ -53,6 +55,8 @@ pub struct KeyLook {
 }
 
 impl KeyLook {
+    /// Resolve a button's look: its normal style (named, else `number` for
+    /// digit-typing keys, else `normal`) and the global `latched` style.
     pub fn for_button(
         styles: &HashMap<String, KeyStyle>,
         token: &str,
@@ -65,6 +69,7 @@ impl KeyLook {
         }
     }
 
+    /// The style for a given state.
     pub fn style(&self, state: KeyState) -> KeyStyle {
         match state {
             KeyState::Normal => self.normal,
@@ -73,6 +78,7 @@ impl KeyLook {
     }
 }
 
+/// Resolve every named style spec into a [`KeyStyle`], dropping bad values.
 pub fn resolve_all(specs: &HashMap<String, KeyStyleSpec>) -> HashMap<String, KeyStyle> {
     specs
         .iter()
@@ -110,7 +116,7 @@ fn for_button(
 
 fn role(style: &str, field: &str, name: Option<&str>) -> Option<ColorRole> {
     let name = name?;
-    let role = color_role::from_name(name);
+    let role = tokens::color_role(name);
     if role.is_none() {
         warn!("key_style {style:?} {field} {name:?} is not a colour role; ignoring it");
     }
