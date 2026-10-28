@@ -1,0 +1,7 @@
+[package]
+name = "mechanix-quicksettings"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+mecha-wayland = { git = "https://github.com/DhanishMecha/mecha-wayland", branch = "feat/theme-slider-widget" }
