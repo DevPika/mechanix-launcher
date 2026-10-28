@@ -1,14 +1,15 @@
 //! Full-panel confirmation for shutdown and restart.
 use mecha_wayland::mechanix_widgets::prelude::{
-    ButtonSize, ButtonVariant, Text, TextContextExt, button, text,
+    Button, ButtonContextExt, ButtonSize, ButtonVariant, Text, TextContextExt, button, text,
 };
 use mecha_wayland::prelude::*;
 
 use crate::quick_settings::QuickSettings;
 use crate::services::{PowerOff, Restart};
-use crate::util::load_icon;
+use crate::util::load_icon_sized;
 
 pub const POWER_ICON: &[u8] = include_bytes!("../assets/power.svg");
+const RESTART_ICON: &[u8] = include_bytes!("../assets/rotate.svg");
 
 pub struct OpenPowerOverlay;
 impl Event for OpenPowerOverlay {}
@@ -21,7 +22,10 @@ enum Action {
 
 pub struct PowerOverlay {
     content: Handle<QuickSettings>,
+    confirm: Handle<Button>,
     label: Handle<Text>,
+    power_icon: SpriteId,
+    restart_icon: SpriteId,
     action: Action,
     open: bool,
 }
@@ -74,6 +78,8 @@ impl Widget for PowerOverlay {
                 .variant(ButtonVariant::Text)
                 .text_color(ColorRole::OnSurface)
                 .label("RESTART")
+                .hover_background(Color::TRANSPARENT)
+                .pressed_background(Color::TRANSPARENT)
                 .height(px(40.0)),
         );
         let close = s.spawn(
@@ -82,6 +88,8 @@ impl Widget for PowerOverlay {
                 .variant(ButtonVariant::Text)
                 .text_color(ColorRole::OnSurface)
                 .label("CLOSE")
+                .hover_background(Color::TRANSPARENT)
+                .pressed_background(Color::TRANSPARENT)
                 .height(px(40.0)),
         );
 
@@ -96,13 +104,15 @@ impl Widget for PowerOverlay {
                     .gap(px(20.0)),
             ),
         );
-        let sprite = load_icon(&mut s.resource_mut::<Atlas>(), POWER_ICON);
+        let icon_size = ButtonSize::XLarge.icon_size() as u32;
+        let power_icon = load_icon_sized(&mut s.resource_mut::<Atlas>(), POWER_ICON, icon_size);
+        let restart_icon = load_icon_sized(&mut s.resource_mut::<Atlas>(), RESTART_ICON, icon_size);
         let confirm = s.spawn(
             center,
             button()
                 .variant(ButtonVariant::Outlined)
                 .size(ButtonSize::XLarge)
-                .icon(sprite)
+                .icon(power_icon)
                 .radius(Corners::all(64.))
                 .width(px(128.0))
                 .height(px(128.0))
@@ -119,6 +129,8 @@ impl Widget for PowerOverlay {
             ctx.me().action = Action::PowerOff;
             let label = ctx.me().label;
             ctx.at(label).unwrap().set_text("Power off");
+            let (confirm, icon) = (ctx.me().confirm, ctx.me().power_icon);
+            ctx.at(confirm).unwrap().set_icon(icon);
             set_open(ctx, true);
         });
         s.on::<Clicked>(restart, |ctx, _| {
@@ -126,6 +138,8 @@ impl Widget for PowerOverlay {
                 ctx.me().action = Action::Restart;
                 let label = ctx.me().label;
                 ctx.at(label).unwrap().set_text("Restart");
+                let (confirm, icon) = (ctx.me().confirm, ctx.me().restart_icon);
+                ctx.at(confirm).unwrap().set_icon(icon);
             }
         });
         s.on::<Clicked>(close, |ctx, _| {
@@ -145,7 +159,10 @@ impl Widget for PowerOverlay {
 
         PowerOverlay {
             content: b.content,
+            confirm,
             label,
+            power_icon,
+            restart_icon,
             action: Action::PowerOff,
             open: false,
         }
