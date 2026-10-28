@@ -1,6 +1,7 @@
 use mecha_wayland::mechanix_widgets::prelude::{ButtonVariant, button, text};
 use mecha_wayland::prelude::*;
 
+use crate::power_overlay::OpenPowerOverlay;
 use crate::util::full_width;
 
 mod svg {
@@ -43,7 +44,7 @@ impl Widget for Header {
             .insert(Class::Icon, &bitmap)
             .expect("power icon should fit in the atlas");
 
-        s.spawn(
+        let power = s.spawn(
             me,
             button()
                 .variant(ButtonVariant::Text)
@@ -55,6 +56,9 @@ impl Widget for Header {
                 .height(px(32.))
                 .text_color(ColorRole::OnSurface),
         );
+        s.on::<Clicked>(power, |ctx, _| {
+            ctx.emit(OpenPowerOverlay, ctx.tree().root());
+        });
 
         Header
     }
