@@ -5,8 +5,7 @@ use crate::header::{HEADER_HEIGHT, HeaderBuilder};
 use crate::sliders::{SLIDERS_HEIGHT, SlidersBuilder};
 use crate::util::full_width;
 
-const HEADER_SLIDER_GAP: f32 = 28.0;
-const TOP_HEIGHT: f32 = HEADER_HEIGHT + HEADER_SLIDER_GAP + SLIDERS_HEIGHT;
+const TOP_HEIGHT: f32 = HEADER_HEIGHT + SLIDERS_HEIGHT;
 const SECTION_GAP: f32 = 31.0;
 
 pub struct QuickSettings;
@@ -32,10 +31,7 @@ impl Widget for QuickSettings {
             .gap(px(SECTION_GAP))
             .justify(Justify::SpaceBetween);
 
-        let top = s.spawn(
-            me,
-            div().style(full_width(TOP_HEIGHT).column().gap(px(HEADER_SLIDER_GAP))),
-        );
+        let top = s.spawn(me, div().style(full_width(TOP_HEIGHT).column()));
         s.spawn(top, b.header);
         s.spawn(top, b.sliders);
         s.spawn(me, b.bottom_bar);

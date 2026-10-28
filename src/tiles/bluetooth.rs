@@ -1,6 +1,7 @@
+use mecha_wayland::mechanix_widgets::prelude::{Text, TextContextExt, TextOverflow, text};
 use mecha_wayland::prelude::*;
 
-use super::{build_label, build_tile};
+use super::build_tile;
 use crate::services::{BluetoothState, BluetoothStateChanged, ToggleBluetooth};
 use crate::util::load_icon;
 
@@ -19,13 +20,9 @@ pub struct Bluetooth {
     pub icon_on: SpriteId,
     pub icon_off: SpriteId,
     pub icon_connected: SpriteId,
-    pub label: String,
 }
 
-pub struct BluetoothBuilder {
-    pub font: FontId,
-    pub name: String,
-}
+pub struct BluetoothBuilder;
 
 impl Build for BluetoothBuilder {
     type Widget = Bluetooth;
@@ -34,13 +31,22 @@ impl Build for BluetoothBuilder {
 impl Widget for Bluetooth {
     type Builder = BluetoothBuilder;
 
-    fn build(b: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
+    fn build(_: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
         let icon_on = load_icon(&mut s.resource_mut::<Atlas>(), svg::ON);
         let icon_off = load_icon(&mut s.resource_mut::<Atlas>(), svg::SLASH);
         let icon_connected = load_icon(&mut s.resource_mut::<Atlas>(), svg::CONNECTED);
 
         let icon = build_tile(me, s, svg::SLASH);
-        let name = build_label(me, s, b.font, "Off");
+        // `short_name` abbreviates device names; ellipsis overflow is a fallback for narrow tiles.
+        let name = s.spawn(
+            me,
+            text("Off")
+                .size(18.0)
+                .max_lines(1)
+                .overflow(TextOverflow::Ellipsis)
+                .style(LayoutStyle::default().max_width(percent(100.0)))
+                .color(ColorRole::OnSurfaceVariant),
+        );
         let dot = s.spawn(
             me,
             div().style(
@@ -56,7 +62,7 @@ impl Widget for Bluetooth {
         });
 
         s.on::<BluetoothStateChanged>(me, |ctx, event| {
-            ctx.set_state(event.state);
+            ctx.set_state(event.state.clone());
         });
 
         Bluetooth {
@@ -66,8 +72,16 @@ impl Widget for Bluetooth {
             icon_on,
             icon_off,
             icon_connected,
-            label: b.name,
         }
+    }
+}
+
+/// Keep short device names intact; abbreviate longer names for the tile.
+fn short_name(name: &str) -> String {
+    if name.chars().count() <= 5 {
+        name.to_string()
+    } else {
+        format!("{}...", name.chars().take(3).collect::<String>())
     }
 }
 
@@ -77,9 +91,9 @@ pub trait BluetoothContext {
 
 impl BluetoothContext for Context<'_, Bluetooth> {
     fn set_state(&mut self, state: BluetoothState) {
-        let (icon_on, icon_off, icon_connected, default_name) = {
+        let (icon_on, icon_off, icon_connected) = {
             let me = self.me();
-            (me.icon_on, me.icon_off, me.icon_connected, me.label.clone())
+            (me.icon_on, me.icon_off, me.icon_connected)
         };
         let is_on = state != BluetoothState::Off;
         let bg_color = if is_on {
@@ -100,15 +114,15 @@ impl BluetoothContext for Context<'_, Bluetooth> {
 
         let (sprite, text) = match state {
             BluetoothState::Off => (icon_off, "Off".to_string()),
-            BluetoothState::Connected => (
+            BluetoothState::Connected { count, name } => (
                 icon_connected,
-                if default_name.is_empty() {
-                    "Connected".to_string()
-                } else {
-                    default_name
+                match name {
+                    Some(name) if count == 1 => short_name(&name),
+                    _ if count <= 1 => "Connected".to_string(),
+                    _ => format!("{count} devices"),
                 },
             ),
-            BluetoothState::On | BluetoothState::Disconnected => (icon_on, "On".to_string()),
+            BluetoothState::On => (icon_on, "On".to_string()),
         };
 
         let icon_handle = self.me().icon;
@@ -126,5 +140,18 @@ impl BluetoothContext for Context<'_, Bluetooth> {
         if let Some(mut dt) = self.at(dot_handle) {
             dt.set_paint(dot_paint);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::short_name;
+
+    #[test]
+    fn device_names_are_shortened_after_five_characters() {
+        assert_eq!(short_name("Buds"), "Buds");
+        assert_eq!(short_name("Pixel"), "Pixel");
+        assert_eq!(short_name("Headphones"), "Hea...");
+        assert_eq!(short_name("Ünïcødé"), "Ünï...");
     }
 }

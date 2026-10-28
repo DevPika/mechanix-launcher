@@ -1,3 +1,4 @@
+use mecha_wayland::mechanix_widgets::prelude::FontBook;
 use mecha_wayland::prelude::*;
 
 mod bottom_bar;
@@ -11,7 +12,7 @@ mod util;
 use bottom_bar::BottomBarBuilder;
 use header::HeaderBuilder;
 use quick_settings::QuickSettingsBuilder;
-use services::{BluetoothModule, UpowerModule};
+use services::{BluetoothModule, DisplayModule, UpowerModule};
 use sliders::SlidersBuilder;
 
 const PANEL_HEIGHT: f32 = 620.0;
@@ -69,16 +70,19 @@ fn main() {
         .expect("bundled Geist Mono font should load");
     let mut app = App::new();
     app.add_module(LayoutModule)
+        .add_module(AnimationModule)
         .add_module(PaintModule)
         .add_module(WindowModule)
         .add_module(MechanixTheme::dark())
         .add_module(InteractivityModule)
-        .add_module(RenderModule::default())
-        .insert_resource(atlas);
+        .add_module(RenderModule::default());
+    app.insert_resource(atlas);
+    app.insert_resource(FontBook::new(font));
     app.add_module(RingModule::default())
         .add_module(DBusModule::new().system())
         .add_module(UpowerModule)
         .add_module(BluetoothModule)
+        .add_module(DisplayModule)
         .add_module(
             WaylandModule::new()
                 .bind::<WlCompositor>()
@@ -97,8 +101,8 @@ fn main() {
         root,
         ShellBuilder {
             root,
-            header: HeaderBuilder { font },
-            bottom_bar: BottomBarBuilder { font },
+            header: HeaderBuilder,
+            bottom_bar: BottomBarBuilder,
             sliders: SlidersBuilder,
         },
     );
