@@ -8,7 +8,7 @@ use crate::quick_settings::QuickSettings;
 use crate::services::{PowerOff, Restart};
 use crate::util::load_icon;
 
-const POWER_ICON: &[u8] = include_bytes!("../assets/power.svg");
+pub const POWER_ICON: &[u8] = include_bytes!("../assets/power.svg");
 
 pub struct OpenPowerOverlay;
 impl Event for OpenPowerOverlay {}

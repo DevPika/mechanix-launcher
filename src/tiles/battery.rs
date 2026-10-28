@@ -10,7 +10,6 @@ mod svg {
 }
 
 pub struct Battery {
-    pub icon: Handle<Icon>,
     pub percentage: Handle<Text>,
 }
 
@@ -24,14 +23,14 @@ impl Widget for Battery {
     type Builder = BatteryBuilder;
 
     fn build(_: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-        let icon = build_tile(me, s, svg::LOW);
+        build_tile(me, s, svg::LOW);
         let percentage = build_label(me, s, "N/A");
 
         s.on::<BatteryPercentageChanged>(me, |ctx, event| {
             ctx.set_percentage(event.percentage);
         });
 
-        Battery { icon, percentage }
+        Battery { percentage }
     }
 }
 

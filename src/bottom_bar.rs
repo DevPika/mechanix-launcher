@@ -55,7 +55,7 @@ impl Widget for BottomBar {
 mod tests {
     use super::*;
     use crate::services::{BatteryPercentageChanged, BluetoothState, BluetoothStateChanged};
-    use crate::tiles::{Battery, Bluetooth};
+    use crate::tiles::{battery::Battery, bluetooth::Bluetooth};
     use mecha_wayland::mechanix_widgets::NativeText;
     use mecha_wayland::mechanix_widgets::prelude::{FontBook, Text};
 

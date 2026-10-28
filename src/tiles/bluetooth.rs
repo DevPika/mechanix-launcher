@@ -5,12 +5,10 @@ use super::build_tile;
 use crate::services::{BluetoothState, BluetoothStateChanged, ToggleBluetooth};
 use crate::util::load_icon;
 
-#[allow(dead_code)]
 mod svg {
     pub const ON: &[u8] = include_bytes!("../../assets/bluetooth/bluetooth.svg");
     pub const CONNECTED: &[u8] = include_bytes!("../../assets/bluetooth/bluetooth-connected.svg");
     pub const SLASH: &[u8] = include_bytes!("../../assets/bluetooth/bluetooth-slash.svg");
-    pub const X: &[u8] = include_bytes!("../../assets/bluetooth/bluetooth-x.svg");
 }
 
 pub struct Bluetooth {

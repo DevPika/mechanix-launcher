@@ -1,12 +1,8 @@
 use mecha_wayland::mechanix_widgets::prelude::{ButtonVariant, button, text};
 use mecha_wayland::prelude::*;
 
-use crate::power_overlay::OpenPowerOverlay;
-use crate::util::full_width;
-
-mod svg {
-    pub const POWER: &[u8] = include_bytes!("../assets/power.svg");
-}
+use crate::power_overlay::{OpenPowerOverlay, POWER_ICON};
+use crate::util::{full_width, load_icon_sized};
 
 pub const HEADER_HEIGHT: f32 = 80.0;
 const DATE: &str = "Today,19 Oct";
@@ -37,12 +33,7 @@ impl Widget for Header {
                 .color(ColorRole::OnSurfaceVariant),
         );
 
-        let bitmap = Bitmap::from_svg(svg::POWER, POWER_ICON_SIZE)
-            .expect("embedded power icon should render");
-        let sprite = s
-            .resource_mut::<Atlas>()
-            .insert(Class::Icon, &bitmap)
-            .expect("power icon should fit in the atlas");
+        let sprite = load_icon_sized(&mut s.resource_mut::<Atlas>(), POWER_ICON, POWER_ICON_SIZE);
 
         let power = s.spawn(
             me,

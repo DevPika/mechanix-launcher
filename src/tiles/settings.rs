@@ -6,9 +6,7 @@ mod svg {
     pub const ICON: &[u8] = include_bytes!("../../assets/settings.svg");
 }
 
-pub struct Settings {
-    pub icon: Handle<Icon>,
-}
+pub struct Settings;
 
 pub struct SettingsBuilder;
 
@@ -20,7 +18,7 @@ impl Widget for Settings {
     type Builder = SettingsBuilder;
 
     fn build(_: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-        let icon = build_tile(me, s, svg::ICON);
-        Settings { icon }
+        build_tile(me, s, svg::ICON);
+        Settings
     }
 }

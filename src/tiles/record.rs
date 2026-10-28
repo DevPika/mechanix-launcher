@@ -6,9 +6,7 @@ mod svg {
     pub const ICON: &[u8] = include_bytes!("../../assets/record.svg");
 }
 
-pub struct Record {
-    pub icon: Handle<Icon>,
-}
+pub struct Record;
 
 pub struct RecordBuilder;
 
@@ -20,7 +18,7 @@ impl Widget for Record {
     type Builder = RecordBuilder;
 
     fn build(_: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-        let icon = build_tile(me, s, svg::ICON);
-        Record { icon }
+        build_tile(me, s, svg::ICON);
+        Record
     }
 }
