@@ -14,7 +14,7 @@ use bottom_bar::BottomBarBuilder;
 use header::HeaderBuilder;
 use power_overlay::PowerOverlayBuilder;
 use quick_settings::QuickSettingsBuilder;
-use services::{BluetoothModule, DisplayModule, PowerModule, UpowerModule};
+use services::{BluetoothModule, DisplayModule, PowerModule, UpowerModule, NetworkManagerModule};
 use sliders::SlidersBuilder;
 
 const PANEL_HEIGHT: f32 = 620.0;
@@ -36,6 +36,7 @@ impl Widget for Shell {
     type Builder = ShellBuilder;
 
     fn build(b: Self::Builder, _me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
+        /*
         let role = Role::Layer(LayerRole {
             layer: Layer::Overlay,
             anchor: Anchor::TOP | Anchor::LEFT | Anchor::RIGHT,
@@ -43,6 +44,7 @@ impl Widget for Shell {
             namespace: "mechanix-quicksettings".into(),
             keyboard_interactivity: KeyboardInteractivity::None,
         });
+          */
 
         let win = s.spawn_with(
             b.root,
@@ -50,7 +52,8 @@ impl Widget for Shell {
                 .title("Mechanix Quick Settings")
                 .clear(s.color(ColorRole::Background))
                 .layout(LayoutStyle::default().height(px(PANEL_HEIGHT))),
-            (role,),
+            // (role,),
+            (),
         );
         s.on::<CloseRequested>(win, |ctx, _| ctx.signal(Stop));
         let content = s.spawn(
@@ -90,6 +93,7 @@ fn main() {
     app.add_module(RingModule::default())
         .add_module(DBusModule::new().system())
         .add_module(UpowerModule)
+        .add_module(NetworkManagerModule)
         .add_module(BluetoothModule)
         .add_module(DisplayModule)
         .add_module(PowerModule)
