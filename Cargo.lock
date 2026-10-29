@@ -996,6 +996,7 @@ dependencies = [
  "interactivity",
  "wayland",
  "widgets",
+ "window",
 ]
 
 [[package]]
