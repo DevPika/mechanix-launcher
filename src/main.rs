@@ -3,6 +3,7 @@ use mecha_wayland::prelude::*;
 
 mod bottom_bar;
 mod header;
+mod power_overlay;
 mod quick_settings;
 mod services;
 mod sliders;
@@ -11,8 +12,9 @@ mod util;
 
 use bottom_bar::BottomBarBuilder;
 use header::HeaderBuilder;
+use power_overlay::PowerOverlayBuilder;
 use quick_settings::QuickSettingsBuilder;
-use services::{BluetoothModule, DisplayModule, UpowerModule};
+use services::{BluetoothModule, DisplayModule, PowerModule, UpowerModule};
 use sliders::SlidersBuilder;
 
 const PANEL_HEIGHT: f32 = 620.0;
@@ -51,12 +53,19 @@ impl Widget for Shell {
             (role,),
         );
         s.on::<CloseRequested>(win, |ctx, _| ctx.signal(Stop));
-        s.spawn(
+        let content = s.spawn(
             win,
             QuickSettingsBuilder {
                 header: b.header,
                 bottom_bar: b.bottom_bar,
                 sliders: b.sliders,
+            },
+        );
+        s.spawn(
+            win,
+            PowerOverlayBuilder {
+                root: b.root,
+                content,
             },
         );
         Shell
@@ -83,6 +92,7 @@ fn main() {
         .add_module(UpowerModule)
         .add_module(BluetoothModule)
         .add_module(DisplayModule)
+        .add_module(PowerModule)
         .add_module(
             WaylandModule::new()
                 .bind::<WlCompositor>()

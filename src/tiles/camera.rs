@@ -6,9 +6,7 @@ mod svg {
     pub const ICON: &[u8] = include_bytes!("../../assets/camera.svg");
 }
 
-pub struct Camera {
-    pub icon: Handle<Icon>,
-}
+pub struct Camera;
 
 pub struct CameraBuilder;
 
@@ -20,7 +18,7 @@ impl Widget for Camera {
     type Builder = CameraBuilder;
 
     fn build(_: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-        let icon = build_tile(me, s, svg::ICON);
-        Camera { icon }
+        build_tile(me, s, svg::ICON);
+        Camera
     }
 }

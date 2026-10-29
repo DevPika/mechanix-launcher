@@ -18,10 +18,6 @@ impl Event for BluetoothStateChanged {}
 pub struct ToggleBluetooth;
 impl Signal for ToggleBluetooth {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SetBluetoothPowered(pub bool);
-impl Signal for SetBluetoothPowered {}
-
 fn decode_prop<T: mecha_wayland::dbus::Decode>(
     props: &PropMap,
     invalidated: &[String],
@@ -129,10 +125,10 @@ pub(super) fn on_snapshot_reply(app: &mut App, event: &MethodReply) {
     let (dirty, state) = {
         let mut bluetooth = app.resource_mut::<BluetoothStatus>();
         bluetooth.pending = None;
-        if !bluetooth.dirty {
-            if let Some((objects,)) = objects {
-                bluetooth.observed = BluetoothObservation::from_managed_objects(objects);
-            }
+        if !bluetooth.dirty
+            && let Some((objects,)) = objects
+        {
+            bluetooth.observed = BluetoothObservation::from_managed_objects(objects);
         }
         (bluetooth.dirty, bluetooth.observed.state())
     };
@@ -157,27 +153,26 @@ pub(super) fn on_signal(app: &mut App, event: &SignalReceived) {
                 request_snapshot(app);
             }
         }
-    } else if event.matches.contains(&bluetooth.matches.properties)
+    } else if (event.matches.contains(&bluetooth.matches.properties)
         || event.matches.contains(&bluetooth.matches.interfaces_added)
         || event
             .matches
-            .contains(&bluetooth.matches.interfaces_removed)
+            .contains(&bluetooth.matches.interfaces_removed))
+        && let Some(change) = decode_change(&event.msg)
     {
-        if let Some(change) = decode_change(&event.msg) {
-            if app.resource::<BluetoothStatus>().pending.is_some() {
-                // The snapshot may predate this signal; request a fresh one once it completes.
-                request_snapshot(app);
+        if app.resource::<BluetoothStatus>().pending.is_some() {
+            // The snapshot may predate this signal; request a fresh one once it completes.
+            request_snapshot(app);
+        } else {
+            let (applied, state) = {
+                let mut bluetooth = app.resource_mut::<BluetoothStatus>();
+                let applied = bluetooth.observed.apply_change(change);
+                (applied, bluetooth.observed.state())
+            };
+            if applied {
+                publish_state(app, state);
             } else {
-                let (applied, state) = {
-                    let mut bluetooth = app.resource_mut::<BluetoothStatus>();
-                    let applied = bluetooth.observed.apply_change(change);
-                    (applied, bluetooth.observed.state())
-                };
-                if applied {
-                    publish_state(app, state);
-                } else {
-                    request_snapshot(app);
-                }
+                request_snapshot(app);
             }
         }
     }
@@ -229,8 +224,4 @@ pub fn toggle(app: &mut App) {
 
 pub(super) fn on_toggle_signal(app: &mut App, _: &ToggleBluetooth) {
     toggle(app);
-}
-
-pub(super) fn on_set_powered_signal(app: &mut App, signal: &SetBluetoothPowered) {
-    set_powered(app, signal.0);
 }

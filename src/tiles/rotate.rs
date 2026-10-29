@@ -6,9 +6,7 @@ mod svg {
     pub const ICON: &[u8] = include_bytes!("../../assets/rotate.svg");
 }
 
-pub struct Rotate {
-    pub icon: Handle<Icon>,
-}
+pub struct Rotate;
 
 pub struct RotateBuilder;
 
@@ -20,7 +18,7 @@ impl Widget for Rotate {
     type Builder = RotateBuilder;
 
     fn build(_: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-        let icon = build_tile(me, s, svg::ICON);
-        Rotate { icon }
+        build_tile(me, s, svg::ICON);
+        Rotate
     }
 }

@@ -35,8 +35,7 @@ impl Module for BluetoothModule {
         app.system(backend::on_snapshot_reply)
             .system(backend::on_signal)
             .system(backend::on_disconnect)
-            .system(backend::on_toggle_signal)
-            .system(backend::on_set_powered_signal);
+            .system(backend::on_toggle_signal);
         backend::request_snapshot(app);
     }
 }

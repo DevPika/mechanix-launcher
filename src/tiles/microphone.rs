@@ -6,9 +6,7 @@ mod svg {
     pub const ICON: &[u8] = include_bytes!("../../assets/microphone.svg");
 }
 
-pub struct Microphone {
-    pub icon: Handle<Icon>,
-}
+pub struct Microphone;
 
 pub struct MicrophoneBuilder;
 
@@ -20,8 +18,7 @@ impl Widget for Microphone {
     type Builder = MicrophoneBuilder;
 
     fn build(_: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-        // Microphone artwork is not available yet.
-        let icon = build_tile(me, s, svg::ICON);
-        Microphone { icon }
+        build_tile(me, s, svg::ICON);
+        Microphone
     }
 }

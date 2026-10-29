@@ -1,6 +1,6 @@
 use mecha_wayland::prelude::*;
 
-pub const ICON_SIZE: u32 = 32;
+const ICON_SIZE: u32 = 32;
 
 pub fn full_width(height: f32) -> LayoutStyle {
     LayoutStyle::default()
@@ -9,7 +9,11 @@ pub fn full_width(height: f32) -> LayoutStyle {
 }
 
 pub fn load_icon(atlas: &mut Atlas, svg: &[u8]) -> SpriteId {
-    let bitmap = Bitmap::from_svg(svg, ICON_SIZE).expect("embedded icon SVG should render");
+    load_icon_sized(atlas, svg, ICON_SIZE)
+}
+
+pub fn load_icon_sized(atlas: &mut Atlas, svg: &[u8], size: u32) -> SpriteId {
+    let bitmap = Bitmap::from_svg(svg, size).expect("embedded icon SVG should render");
     atlas
         .insert(Class::Icon, &bitmap)
         .expect("icon should fit in the atlas")
