@@ -1,7 +1,7 @@
 pub mod indicators;
 mod module;
 pub mod status_bar;
-pub use services::{BluetoothModule, BluetoothStatus, UpowerModule, WifiModule, WifiStatus};
+pub use services::{BluetoothModule, BluetoothStatus, NetworkManagerModule, UpowerModule};
 
 use mecha_wayland::prelude::*;
 
@@ -199,10 +199,15 @@ mod tests {
             bar,
         );
         app.emit(
-            ::services::WifiStateChanged {
-                state: ::services::WifiState::Connected {
-                    strength: Some(100),
-                },
+            ::services::StateUpdate {
+                state: ::services::WifiState::Connected,
+            },
+            bar,
+        );
+        app.emit(
+            ::services::APUpdate {
+                ssid: Some(b"Office".to_vec()),
+                strength: 100,
             },
             bar,
         );
@@ -367,18 +372,40 @@ mod tests {
             );
         }
 
+        // Strength only shows once NetworkManager reports a connection.
+        app.emit(
+            ::services::APUpdate {
+                ssid: Some(b"Office".to_vec()),
+                strength: 100,
+            },
+            bar,
+        );
+        app.tick();
+        assert_eq!(
+            app.widget::<WifiIndicator>(bar_widget.wifi)
+                .unwrap()
+                .state(),
+            WifiState::Disabled
+        );
+        app.emit(
+            ::services::StateUpdate {
+                state: ::services::WifiState::Connected,
+            },
+            bar,
+        );
         for (strength, expected) in [
-            (None, WifiState::None),
-            (Some(24), WifiState::None),
-            (Some(25), WifiState::Low),
-            (Some(49), WifiState::Low),
-            (Some(50), WifiState::Medium),
-            (Some(74), WifiState::Medium),
-            (Some(75), WifiState::High),
+            (0, WifiState::None),
+            (24, WifiState::None),
+            (25, WifiState::Low),
+            (49, WifiState::Low),
+            (50, WifiState::Medium),
+            (74, WifiState::Medium),
+            (75, WifiState::High),
         ] {
             app.emit(
-                ::services::WifiStateChanged {
-                    state: ::services::WifiState::Connected { strength },
+                ::services::APUpdate {
+                    ssid: Some(b"Office".to_vec()),
+                    strength,
                 },
                 bar,
             );
@@ -392,9 +419,12 @@ mod tests {
         }
         for (state, expected) in [
             (::services::WifiState::Disconnected, WifiState::Disconnected),
-            (::services::WifiState::Disabled, WifiState::Disabled),
+            (::services::WifiState::Connecting, WifiState::Disconnected),
+            (::services::WifiState::Connected, WifiState::High),
+            (::services::WifiState::Off, WifiState::Disabled),
+            (::services::WifiState::Unavailable, WifiState::Disabled),
         ] {
-            app.emit(::services::WifiStateChanged { state }, bar);
+            app.emit(::services::StateUpdate { state }, bar);
             app.tick();
             assert_eq!(
                 app.widget::<WifiIndicator>(bar_widget.wifi)

@@ -1,4 +1,4 @@
-use ::services::{BatteryPercentageChanged, BluetoothStateChanged, WifiStateChanged};
+use ::services::{APUpdate, BatteryPercentageChanged, BluetoothStateChanged, StateUpdate};
 use mecha_wayland::prelude::*;
 
 use crate::indicators::*;
@@ -78,8 +78,11 @@ impl Widget for StatusBar {
         s.on::<BluetoothStateChanged>(me, move |ctx, event| {
             ctx.at(bluetooth).unwrap().set_state((&event.state).into());
         });
-        s.on::<WifiStateChanged>(me, move |ctx, event| {
-            ctx.at(wifi).unwrap().set_state(event.state.into());
+        s.on::<StateUpdate>(me, move |ctx, event| {
+            ctx.at(wifi).unwrap().set_connection(event.state);
+        });
+        s.on::<APUpdate>(me, move |ctx, event| {
+            ctx.at(wifi).unwrap().set_strength(event.strength);
         });
 
         StatusBar {

@@ -3,7 +3,7 @@ use mecha_wayland::prelude::*;
 
 use super::{build_label, build_tile};
 use crate::util::load_icon;
-use services::network_manager::{APUpdate, SetWifiEnabled, StateUpdate, WifiState};
+use services::{APUpdate, SetWifiEnabled, StateUpdate, WifiState};
 
 // Inclusive lower bounds for the signal-strength icons (0–100%).
 const WIFI_MID_MIN_PERCENT: u8 = 25;

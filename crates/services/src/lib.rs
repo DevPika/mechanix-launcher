@@ -5,7 +5,6 @@ pub mod display;
 pub mod network_manager;
 pub mod power;
 pub mod upower;
-pub mod wifi;
 
 pub use bluetooth::{
     BluetoothModule, BluetoothState, BluetoothStateChanged, BluetoothStatus, ToggleBluetooth,
@@ -13,6 +12,6 @@ pub use bluetooth::{
 pub use display::{
     BrightnessChanged, DisplayModule, MAX_BRIGHTNESS, MIN_BRIGHTNESS, SetBrightness,
 };
+pub use network_manager::{APUpdate, NetworkManagerModule, SetWifiEnabled, StateUpdate, WifiState};
 pub use power::{PowerModule, PowerOff, Restart};
 pub use upower::{BatteryPercentageChanged, UpowerModule};
-pub use wifi::{WifiModule, WifiState, WifiStateChanged, WifiStatus};

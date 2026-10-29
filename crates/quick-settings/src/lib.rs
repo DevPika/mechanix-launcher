@@ -13,8 +13,7 @@ use bottom_bar::BottomBarBuilder;
 use header::HeaderBuilder;
 use power_overlay::PowerOverlayBuilder;
 use quick_settings::QuickSettingsBuilder;
-use services::network_manager::NetworkManagerModule;
-use services::{BluetoothModule, DisplayModule, PowerModule, UpowerModule};
+use services::{BluetoothModule, DisplayModule, NetworkManagerModule, PowerModule, UpowerModule};
 use sliders::SlidersBuilder;
 
 /// Installs the quick settings' services (UPower, Bluetooth, display
