@@ -18,6 +18,16 @@ pub enum BluetoothState {
     Disconnected,
 }
 
+impl From<&::services::BluetoothState> for BluetoothState {
+    fn from(state: &::services::BluetoothState) -> Self {
+        match state {
+            ::services::BluetoothState::Connected { .. } => Self::Connected,
+            ::services::BluetoothState::On => Self::On,
+            ::services::BluetoothState::Off => Self::Off,
+        }
+    }
+}
+
 impl BluetoothState {
     #[inline]
     pub fn is_visible(&self) -> bool {

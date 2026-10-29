@@ -13,6 +13,9 @@ use mecha_wayland::prelude::*;
 pub struct UpowerModule;
 impl Module for UpowerModule {
     fn install(self, app: &mut App) {
+        if app.has_resource::<UpowerBattery>() {
+            return;
+        }
         let (watch, property_read) = {
             let mut dbus = app.resource_mut::<DBus>();
             let mut bus = dbus.system();

@@ -54,10 +54,10 @@ impl Widget for BottomBar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::{BatteryPercentageChanged, BluetoothState, BluetoothStateChanged};
     use crate::tiles::{battery::Battery, bluetooth::Bluetooth};
     use mecha_wayland::mechanix_widgets::NativeText;
     use mecha_wayland::mechanix_widgets::prelude::{FontBook, Text};
+    use services::{BatteryPercentageChanged, BluetoothState, BluetoothStateChanged};
 
     #[test]
     fn battery_service_updates_bottom_bar_label() {

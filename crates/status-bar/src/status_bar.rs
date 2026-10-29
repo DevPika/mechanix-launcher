@@ -1,3 +1,4 @@
+use ::services::{BatteryPercentageChanged, BluetoothStateChanged, WifiStateChanged};
 use mecha_wayland::prelude::*;
 
 use crate::indicators::*;
@@ -71,26 +72,14 @@ impl Widget for StatusBar {
         );
         let battery = s.spawn(right_cluster, battery_percentage());
 
-        // Event handler for external/pluggable status updates (D-Bus or Demo)
-        s.on::<StatusUpdate>(me, move |ctx, event| match *event {
-            StatusUpdate::Wifi(state) => {
-                ctx.at(wifi).unwrap().set_state(state);
-            }
-            StatusUpdate::Bluetooth(state) => {
-                ctx.at(bluetooth).unwrap().set_state(state);
-            }
-            StatusUpdate::Cellular(state) => {
-                ctx.at(cellular).unwrap().set_state(state);
-            }
-            StatusUpdate::Airplane(state) => {
-                ctx.at(airplane).unwrap().set_state(state);
-            }
-            StatusUpdate::Battery(pct) => {
-                ctx.at(battery).unwrap().set_percentage(pct);
-            }
-            StatusUpdate::Glyph(state) => {
-                ctx.at(glyph).unwrap().set_state(state);
-            }
+        s.on::<BatteryPercentageChanged>(me, move |ctx, event| {
+            ctx.at(battery).unwrap().set_percentage(event.percentage);
+        });
+        s.on::<BluetoothStateChanged>(me, move |ctx, event| {
+            ctx.at(bluetooth).unwrap().set_state((&event.state).into());
+        });
+        s.on::<WifiStateChanged>(me, move |ctx, event| {
+            ctx.at(wifi).unwrap().set_state(event.state.into());
         });
 
         StatusBar {
@@ -103,17 +92,3 @@ impl Widget for StatusBar {
         }
     }
 }
-
-/// A decoupled status update event for controlling status bar indicators.
-/// Emitted by either background D-Bus monitors or the visual demo driver.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StatusUpdate {
-    Wifi(WifiState),
-    Bluetooth(BluetoothState),
-    Cellular(CellularState),
-    Airplane(AirplaneState),
-    Battery(Option<u8>),
-    Glyph(GlyphState),
-}
-
-impl Event for StatusUpdate {}

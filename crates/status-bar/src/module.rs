@@ -3,17 +3,17 @@ use screen::Screen;
 
 use crate::{BluetoothModule, UpowerModule, WifiModule, status_bar};
 
-/// Installs the status bar's services (Wi-Fi, Bluetooth and UPower). It spawns
-/// no window; place the bar with [`StatusBarScreen`].
+/// Installs the status bar's services (Wi-Fi, Bluetooth and UPower), all from
+/// `services` and shared with other screens.
+/// It spawns no window; place the bar with [`StatusBarScreen`].
 ///
 /// Expects the host to have installed D-Bus and to have inserted the
 /// [`Atlas`], `FontBook` and [`StatusIcons`](crate::StatusIcons).
 ///
 /// Build the status bar before adding this module (for example, add the
 /// `NavModule` whose container holds a [`StatusBarScreen`] first): the
-/// initial UPower reply is emitted straight to the
-/// [`StatusBar`](crate::StatusBar) widgets that exist at that point, so a
-/// bar built later misses it.
+/// initial UPower reply is emitted to the widgets that exist at that point,
+/// so a bar built later misses it.
 pub struct StatusBarModule;
 
 impl Module for StatusBarModule {

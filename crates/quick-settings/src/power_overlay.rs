@@ -5,8 +5,8 @@ use mecha_wayland::mechanix_widgets::prelude::{
 use mecha_wayland::prelude::*;
 
 use crate::quick_settings::QuickSettings;
-use crate::services::{PowerOff, Restart};
 use crate::util::load_icon_sized;
+use services::{PowerOff, Restart};
 
 pub const POWER_ICON: &[u8] = include_bytes!("../assets/power.svg");
 const RESTART_ICON: &[u8] = include_bytes!("../assets/rotate.svg");
@@ -60,7 +60,7 @@ impl Widget for PowerOverlay {
             .column()
             .padding(Insets::all(px(24.0)));
         *s.component_mut::<Paint>(me).unwrap() =
-            Paint::Quad(Quad::new(s.color(ColorRole::Background)));
+            Paint::Quad(Quad::new(s.color(ColorRole::SurfaceDim)));
 
         let top = s.spawn(
             me,

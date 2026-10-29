@@ -22,6 +22,9 @@ impl Resource for PowerStatus {}
 pub struct PowerModule;
 impl Module for PowerModule {
     fn install(self, app: &mut App) {
+        if app.has_resource::<PowerStatus>() {
+            return;
+        }
         app.insert_resource(PowerStatus { pending: None });
         app.system(on_power_off)
             .system(on_restart)

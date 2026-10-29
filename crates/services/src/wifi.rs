@@ -1,7 +1,6 @@
 //! Observe NetworkManager's Wi-Fi radio, connected devices, and signal strength.
 use std::collections::{HashMap, HashSet};
 
-use crate::{StatusBar, StatusUpdate, WifiState};
 use mecha_wayland::prelude::*;
 
 const NM: &str = "org.freedesktop.NetworkManager";
@@ -11,6 +10,23 @@ const WIRELESS: &str = "org.freedesktop.NetworkManager.Device.Wireless";
 const AP: &str = "org.freedesktop.NetworkManager.AccessPoint";
 const WIFI_DEVICE: u32 = 2;
 const ACTIVATED: u32 = 100;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WifiState {
+    /// `strength` is the strongest active access point (0-100), when known.
+    Connected {
+        strength: Option<u8>,
+    },
+    Disconnected,
+    #[default]
+    Disabled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WifiStateChanged {
+    pub state: WifiState,
+}
+impl Event for WifiStateChanged {}
 
 #[derive(Default)]
 struct Snapshot {
@@ -28,11 +44,8 @@ impl Snapshot {
         }
         match self.radio? {
             false => Some(WifiState::Disabled),
-            true if self.connected => Some(match self.strength {
-                Some(0..=24) | None => WifiState::None,
-                Some(25..=49) => WifiState::Low,
-                Some(50..=74) => WifiState::Medium,
-                Some(_) => WifiState::High,
+            true if self.connected => Some(WifiState::Connected {
+                strength: self.strength,
             }),
             true => Some(WifiState::Disconnected),
         }
@@ -133,6 +146,9 @@ impl Resource for WifiStatus {}
 pub struct WifiModule;
 impl Module for WifiModule {
     fn install(self, app: &mut App) {
+        if app.has_resource::<WifiStatus>() {
+            return;
+        }
         let (properties, devices, owner) = {
             let mut dbus = app.resource_mut::<DBus>();
             let mut bus = dbus.system();
@@ -239,8 +255,10 @@ fn publish(app: &mut App, state: WifiState) {
     }
     // eprintln!("[wifi] state: {previous:?} -> {state:?}");
     app.resource_mut::<WifiStatus>().state = state;
-    let bars: Vec<NodeId> = app.widgets::<StatusBar>().map(|(id, _)| id).collect();
-    app.emit(StatusUpdate::Wifi(state), bars);
+    app.emit(
+        WifiStateChanged { state },
+        app.descendants(app.root()).collect::<Vec<_>>(),
+    );
 }
 
 fn reply_props(event: &MethodReply, interface: &str) -> Option<PropMap> {
@@ -421,18 +439,15 @@ mod tests {
         snapshot.connected = false;
         assert_eq!(snapshot.state(), Some(WifiState::Disconnected));
         snapshot.connected = true;
-        assert_eq!(snapshot.state(), Some(WifiState::None));
-        for (strength, expected) in [
-            (24, WifiState::None),
-            (25, WifiState::Low),
-            (49, WifiState::Low),
-            (50, WifiState::Medium),
-            (74, WifiState::Medium),
-            (75, WifiState::High),
-        ] {
-            snapshot.strength = Some(strength);
-            assert_eq!(snapshot.state(), Some(expected));
-        }
+        assert_eq!(
+            snapshot.state(),
+            Some(WifiState::Connected { strength: None })
+        );
+        snapshot.strength = Some(42);
+        assert_eq!(
+            snapshot.state(),
+            Some(WifiState::Connected { strength: Some(42) })
+        );
         snapshot.strength = None;
         snapshot.record_strength(20);
         snapshot.record_strength(75);
@@ -505,7 +520,10 @@ mod tests {
             ("DeviceType", Value::U32(WIFI_DEVICE)),
             ("State", Value::U32(ACTIVATED)),
         ]))));
-        assert_eq!(snapshot.state(), Some(WifiState::None));
+        assert_eq!(
+            snapshot.state(),
+            Some(WifiState::Connected { strength: None })
+        );
         assert!(!snapshot.device(None));
         assert_eq!(snapshot.state(), None);
 
@@ -539,18 +557,30 @@ mod tests {
             Value::ObjectPath(ObjectPath::new("/").unwrap()),
         )]);
         assert_eq!(snapshot.wireless(Some(&no_ap)), None);
-        assert_eq!(snapshot.state(), Some(WifiState::None));
+        assert_eq!(
+            snapshot.state(),
+            Some(WifiState::Connected { strength: None })
+        );
         let first_props = props(&[("ActiveAccessPoint", Value::ObjectPath(first.clone()))]);
         assert_eq!(snapshot.wireless(Some(&first_props)), Some(first.clone()));
         assert_eq!(snapshot.wireless(Some(&first_props)), None);
         snapshot.access_point(&first, Some(&props(&[("Strength", Value::U8(35))])));
-        assert_eq!(snapshot.state(), Some(WifiState::Low));
+        assert_eq!(
+            snapshot.state(),
+            Some(WifiState::Connected { strength: Some(35) })
+        );
         let second_props = props(&[("ActiveAccessPoint", Value::ObjectPath(second.clone()))]);
         assert_eq!(snapshot.wireless(Some(&second_props)), Some(second.clone()));
         snapshot.access_point(&second, Some(&props(&[("Strength", Value::U8(80))])));
-        assert_eq!(snapshot.state(), Some(WifiState::High));
+        assert_eq!(
+            snapshot.state(),
+            Some(WifiState::Connected { strength: Some(80) })
+        );
         snapshot.access_point(&first, Some(&props(&[("Strength", Value::U8(15))])));
-        assert_eq!(snapshot.state(), Some(WifiState::High));
+        assert_eq!(
+            snapshot.state(),
+            Some(WifiState::Connected { strength: Some(80) })
+        );
         let unrelated = ObjectPath::new("/org/freedesktop/NetworkManager/AccessPoint/3").unwrap();
         snapshot.access_point(&unrelated, Some(&props(&[("Strength", Value::U8(100))])));
         assert_eq!(snapshot.strength, Some(80));
@@ -577,7 +607,10 @@ mod tests {
         };
         snapshot.active_aps.insert(ap.clone());
         snapshot.access_point(&ap, Some(&PropMap::new()));
-        assert_eq!(snapshot.state(), Some(WifiState::None));
+        assert_eq!(
+            snapshot.state(),
+            Some(WifiState::Connected { strength: None })
+        );
         snapshot.access_point(&ap, None);
         assert_eq!(snapshot.state(), None);
     }

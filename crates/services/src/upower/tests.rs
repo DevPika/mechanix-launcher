@@ -1,4 +1,9 @@
-use super::*;
+use super::UpowerModule;
+use super::backend::{
+    BatteryPercentageChanged, DEVICE_INTERFACE, DISPLAY_DEVICE, UPOWER, UpowerBattery,
+    battery_percentage, battery_valid, upower_types,
+};
+use mecha_wayland::prelude::*;
 use std::collections::VecDeque;
 use std::io::{ErrorKind, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -7,10 +12,8 @@ use std::os::unix::net::UnixStream;
 struct Updates(Vec<Option<u8>>);
 impl Resource for Updates {}
 
-fn record_update(app: &mut App, event: &Emitted<StatusUpdate>) {
-    if let StatusUpdate::Battery(percentage) = event.event {
-        app.resource_mut::<Updates>().0.push(percentage);
-    }
+fn record_update(app: &mut App, event: &Emitted<BatteryPercentageChanged>) {
+    app.resource_mut::<Updates>().0.push(event.event.percentage);
 }
 
 /// A private socket pair supplies only the D-Bus startup handshake. Tests inject
@@ -247,6 +250,25 @@ fn installation_subscribes_before_requesting_the_initial_snapshot() {
 }
 
 #[test]
+fn second_installation_is_a_no_op() {
+    let mut h = Harness::new();
+    let call = h.call();
+    h.app.add_module(UpowerModule);
+    assert_eq!(h.call(), call);
+
+    let members = |h: &mut Harness| -> Vec<String> {
+        h.requests()
+            .iter()
+            .map(|m| m.member().unwrap().as_str().to_owned())
+            .collect()
+    };
+    assert_eq!(members(&mut h), members(&mut Harness::new()));
+
+    h.reply(call, snapshot(true, 2, 42.0));
+    assert_eq!(h.updates(), [Some(42)]);
+}
+
+#[test]
 fn eligibility_requires_both_presence_and_battery_type() {
     let mut h = Harness::new();
     for (present, device_type, expected) in [
@@ -399,8 +421,10 @@ fn percentage_signal_emits_even_when_other_properties_are_absent() {
 }
 
 #[test]
-fn missing_percentage_and_unrelated_invalidations_emit_nothing() {
+fn missing_percentage_and_unrelated_invalidations_leave_label_unchanged() {
     let mut h = Harness::new();
+    h.reply(h.call(), snapshot(true, 2, 80.0));
+    assert_eq!(h.updates(), [Some(80)]);
     let call = h.call();
     h.change(PropMap::new(), &[]);
     h.change(props(&[("TimeToEmpty", Value::I64(120))]), &["State"]);
@@ -411,6 +435,8 @@ fn missing_percentage_and_unrelated_invalidations_emit_nothing() {
 #[test]
 fn unrelated_invalidation_does_not_suppress_percentage() {
     let mut h = Harness::new();
+    h.reply(h.call(), snapshot(true, 2, 80.0));
+    h.updates();
     let call = h.call();
     h.change(props(&[("Percentage", Value::F64(55.0))]), &["TimeToEmpty"]);
     assert_eq!(h.call(), call);
@@ -418,7 +444,7 @@ fn unrelated_invalidation_does_not_suppress_percentage() {
 }
 
 #[test]
-fn explicit_eligibility_changes_alone_are_ignored_as_designed() {
+fn explicit_eligibility_changes_refresh_snapshot() {
     let mut h = Harness::new();
     h.reply(h.call(), snapshot(true, 2, 80.0));
     h.updates();
@@ -427,8 +453,20 @@ fn explicit_eligibility_changes_alone_are_ignored_as_designed() {
         props(&[("IsPresent", Value::Bool(false)), ("Type", Value::U32(3))]),
         &[],
     );
-    assert_eq!(h.call(), call);
+    assert_ne!(h.call(), call);
     assert!(battery_valid(&h.app));
+    assert!(h.updates().is_empty());
+    h.reply(h.call(), snapshot(false, 3, 80.0));
+    assert!(!battery_valid(&h.app));
+    assert_eq!(h.updates(), [None]);
+}
+
+#[test]
+fn percentage_signal_on_ineligible_device_does_not_show_battery() {
+    let mut h = Harness::new();
+    h.reply(h.call(), snapshot(false, 2, 40.0));
+    assert_eq!(h.updates(), [None]);
+    h.change(props(&[("Percentage", Value::F64(60.0))]), &[]);
     assert!(h.updates().is_empty());
 }
 
@@ -454,6 +492,8 @@ fn unrelated_subscription_is_ignored_before_parsing() {
 #[test]
 fn matching_subscription_need_not_be_first_in_matches() {
     let mut h = Harness::new();
+    h.reply(h.call(), snapshot(true, 2, 80.0));
+    h.updates();
     let other = h
         .app
         .resource_mut::<DBus>()

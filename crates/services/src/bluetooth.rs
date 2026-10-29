@@ -15,6 +15,9 @@ use types::{BluetoothObservation, Matches};
 pub struct BluetoothModule;
 impl Module for BluetoothModule {
     fn install(self, app: &mut App) {
+        if app.has_resource::<BluetoothStatus>() {
+            return;
+        }
         let matches = {
             let mut dbus = app.resource_mut::<DBus>();
             let mut bus = dbus.system();

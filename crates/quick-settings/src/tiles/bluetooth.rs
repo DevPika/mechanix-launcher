@@ -2,8 +2,8 @@ use mecha_wayland::mechanix_widgets::prelude::{Text, TextContextExt, TextOverflo
 use mecha_wayland::prelude::*;
 
 use super::build_tile;
-use crate::services::{BluetoothState, BluetoothStateChanged, ToggleBluetooth};
 use crate::util::load_icon;
+use services::{BluetoothState, BluetoothStateChanged, ToggleBluetooth};
 
 mod svg {
     pub const ON: &[u8] = include_bytes!("../../assets/bluetooth/bluetooth.svg");

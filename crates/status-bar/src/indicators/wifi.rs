@@ -22,6 +22,21 @@ pub enum WifiState {
     Disconnected,
 }
 
+impl From<::services::WifiState> for WifiState {
+    fn from(state: ::services::WifiState) -> Self {
+        match state {
+            ::services::WifiState::Connected { strength } => match strength {
+                Some(0..=24) | None => Self::None,
+                Some(25..=49) => Self::Low,
+                Some(50..=74) => Self::Medium,
+                Some(_) => Self::High,
+            },
+            ::services::WifiState::Disconnected => Self::Disconnected,
+            ::services::WifiState::Disabled => Self::Disabled,
+        }
+    }
+}
+
 impl WifiState {
     #[inline]
     pub fn is_visible(&self) -> bool {

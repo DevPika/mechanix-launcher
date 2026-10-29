@@ -1,7 +1,9 @@
 [package]
-name = "mechanix-quicksettings"
+name = "quick-settings"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-mecha-wayland = { git = "https://github.com/DhanishMecha/mecha-wayland", branch = "feat/theme-slider-widget" }
+mecha-wayland.workspace = true
+screen.workspace = true
+services.workspace = true

@@ -1,8 +1,8 @@
 use mecha_wayland::mechanix_widgets::prelude::{Slider, SliderChange, SliderContextExt, slider};
 use mecha_wayland::prelude::*;
 
-use crate::services::{BrightnessChanged, MAX_BRIGHTNESS, MIN_BRIGHTNESS, SetBrightness};
 use crate::util::load_icon;
+use services::{BrightnessChanged, MAX_BRIGHTNESS, MIN_BRIGHTNESS, SetBrightness};
 
 mod svg {
     pub const MEDIUM: &[u8] = include_bytes!("../../assets/brightness/brightness-medium.svg");

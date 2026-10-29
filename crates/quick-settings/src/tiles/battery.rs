@@ -1,7 +1,7 @@
 use mecha_wayland::mechanix_widgets::prelude::{Text, TextContextExt};
 use mecha_wayland::prelude::*;
 
-use crate::services::BatteryPercentageChanged;
+use services::BatteryPercentageChanged;
 
 use super::{build_label, build_tile};
 

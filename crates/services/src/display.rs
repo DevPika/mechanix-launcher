@@ -13,6 +13,9 @@ use mecha_wayland::prelude::*;
 pub struct DisplayModule;
 impl Module for DisplayModule {
     fn install(self, app: &mut App) {
+        if app.has_resource::<DisplayStatus>() {
+            return;
+        }
         let owner_changed = app
             .resource_mut::<DBus>()
             .system()
