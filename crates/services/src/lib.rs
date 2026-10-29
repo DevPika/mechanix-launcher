@@ -2,6 +2,7 @@
 //! safe to add more than once; only the first install takes effect.
 pub mod bluetooth;
 pub mod display;
+pub mod network_manager;
 pub mod power;
 pub mod upower;
 pub mod wifi;

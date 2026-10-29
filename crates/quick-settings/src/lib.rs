@@ -13,6 +13,7 @@ use bottom_bar::BottomBarBuilder;
 use header::HeaderBuilder;
 use power_overlay::PowerOverlayBuilder;
 use quick_settings::QuickSettingsBuilder;
+use services::network_manager::NetworkManagerModule;
 use services::{BluetoothModule, DisplayModule, PowerModule, UpowerModule};
 use sliders::SlidersBuilder;
 
@@ -28,6 +29,7 @@ pub struct QuickSettingsModule;
 impl Module for QuickSettingsModule {
     fn install(self, app: &mut App) {
         app.add_module(UpowerModule)
+            .add_module(NetworkManagerModule)
             .add_module(BluetoothModule)
             .add_module(DisplayModule)
             .add_module(PowerModule);
