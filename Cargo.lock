@@ -507,7 +507,6 @@ version = "0.1.0"
 dependencies = [
  "mecha-wayland",
  "screen",
- "status-bar",
 ]
 
 [[package]]
