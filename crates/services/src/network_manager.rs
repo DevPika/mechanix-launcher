@@ -128,6 +128,9 @@ impl Resource for NMState {}
 pub struct NetworkManagerModule;
 impl Module for NetworkManagerModule {
     fn install(self, app: &mut App) {
+        if app.has_resource::<NMState>() {
+            return;
+        }
         wifi_trace!("Install: subscribe to NetworkManager and read initial state");
         let (properties_changed, device_added, device_removed, call) = {
             let mut dbus = app.resource_mut::<DBus>();

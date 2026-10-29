@@ -1,7 +1,7 @@
 use mecha_wayland::prelude::*;
 use screen::Screen;
 
-use crate::{BluetoothModule, UpowerModule, WifiModule, status_bar};
+use crate::{BluetoothModule, NetworkManagerModule, UpowerModule, status_bar};
 
 /// Installs the status bar's services (Wi-Fi, Bluetooth and UPower), all from
 /// `services` and shared with other screens.
@@ -18,7 +18,7 @@ pub struct StatusBarModule;
 
 impl Module for StatusBarModule {
     fn install(self, app: &mut App) {
-        app.add_module(WifiModule)
+        app.add_module(NetworkManagerModule)
             .add_module(BluetoothModule)
             .add_module(UpowerModule);
     }
