@@ -3,7 +3,7 @@ use mecha_wayland::prelude::*;
 use crate::indicators::{indicator_layout, load_svg_icon};
 
 mod svg {
-    pub const AIRPLANE: &[u8] = include_bytes!("../../assets/airplane.svg");
+    pub use assets::icons::AIRPLANE;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

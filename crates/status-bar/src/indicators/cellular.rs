@@ -2,15 +2,7 @@ use mecha_wayland::prelude::*;
 
 use crate::indicators::{indicator_layout, load_svg_icon};
 
-mod svg {
-    pub const FULL: &[u8] = include_bytes!("../../assets/cellular/cell-signal-full.svg");
-    pub const HIGH: &[u8] = include_bytes!("../../assets/cellular/cell-signal-high.svg");
-    pub const MEDIUM: &[u8] = include_bytes!("../../assets/cellular/cell-signal-medium.svg");
-    pub const LOW: &[u8] = include_bytes!("../../assets/cellular/cell-signal-low.svg");
-    pub const NONE: &[u8] = include_bytes!("../../assets/cellular/cell-signal-none.svg");
-    pub const SLASH: &[u8] = include_bytes!("../../assets/cellular/cell-signal-slash.svg");
-    pub const X: &[u8] = include_bytes!("../../assets/cellular/cell-signal-x.svg");
-}
+use assets::icons::cellular as svg;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CellularState {

@@ -32,6 +32,8 @@ members = [
     "crates/quick-settings",
     "crates/nav",
     "crates/keyboard",
+    "crates/services",
+    "crates/assets",
 ]
 resolver = "3"
 
@@ -48,8 +50,10 @@ notifications = { path = "crates/notifications" }
 quick-settings = { path = "crates/quick-settings" }
 nav = { path = "crates/nav" }
 keyboard = { path = "crates/keyboard" }
+services = { path = "crates/services" }
+assets = { path = "crates/assets" }
 
 # Local development override — assumes mecha-wayland is cloned as a sibling
 # directory: ../mecha-wayland
-[patch."https://github.com/mecha-org/mecha-wayland"]
-mecha-wayland = { path = "../mecha-wayland" }
+# [patch."https://github.com/mecha-org/mecha-wayland"]
+# mecha-wayland = { path = "../mecha-wayland" }

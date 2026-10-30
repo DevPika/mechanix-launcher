@@ -26,6 +26,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 [[package]]
 name = "animation"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "geometry",
@@ -37,6 +38,7 @@ dependencies = [
 [[package]]
 name = "app"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "smallvec",
 ]
@@ -63,8 +65,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
+name = "assets"
+version = "0.1.0"
+
+[[package]]
 name = "atlas"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "fontdue",
@@ -126,9 +133,9 @@ dependencies = [
 
 [[package]]
 name = "crc32fast"
-version = "1.5.2"
+version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01a7799fd6b852db0e61728dde9a204c423b44d689dbd432522543614b490e78"
+checksum = "0ba106e844045ddc02c20768ac4b0b7cb45f2cc2ecbd833ac9f5dacb183c2055"
 dependencies = [
  "cfg-if",
 ]
@@ -142,6 +149,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 [[package]]
 name = "dbus"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "ring",
@@ -213,9 +221,9 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "fontdue"
-version = "0.9.4"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7894823fa221401399e2598f8b63f81ac77ff5c63248b7656779bff1632d7d3d"
+checksum = "e796cb6894e6418daacea84b28dd4f98d3b32c74d5bb452ba1ecfbf5ad8e84ca"
 dependencies = [
  "hashbrown 0.15.5",
  "ttf-parser",
@@ -269,6 +277,7 @@ dependencies = [
 [[package]]
 name = "geometry"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 
 [[package]]
 name = "gestures"
@@ -277,6 +286,7 @@ version = "0.1.0"
 [[package]]
 name = "gles"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "atlas",
  "gbm",
@@ -349,6 +359,7 @@ dependencies = [
 [[package]]
 name = "interactivity"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "geometry",
@@ -441,6 +452,7 @@ dependencies = [
 [[package]]
 name = "layout"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "geometry",
@@ -505,6 +517,7 @@ dependencies = [
 [[package]]
 name = "mecha-wayland"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "animation",
  "app",
@@ -529,6 +542,7 @@ dependencies = [
 [[package]]
 name = "mechanix-widgets"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "atlas",
@@ -548,9 +562,9 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "memmap2"
-version = "0.9.11"
+version = "0.9.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1219ed1b7f229ee7104d281dd01d6802fe28bb6e95d292942c4daacdeb798c0"
+checksum = "6b0ca1155a9ecc25aa12e8313a119f32edf0255fea2f44839c4ac0a12b2ac157"
 dependencies = [
  "libc",
 ]
@@ -620,6 +634,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 [[package]]
 name = "paint"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "atlas",
@@ -667,6 +682,7 @@ dependencies = [
 [[package]]
 name = "presentation"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "atlas",
@@ -703,9 +719,10 @@ dependencies = [
 name = "quick-settings"
 version = "0.1.0"
 dependencies = [
+ "assets",
  "mecha-wayland",
  "screen",
- "status-bar",
+ "services",
 ]
 
 [[package]]
@@ -747,6 +764,7 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 [[package]]
 name = "render"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "animation",
  "app",
@@ -782,6 +800,7 @@ dependencies = [
 [[package]]
 name = "ring"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "io-uring",
@@ -805,9 +824,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
 dependencies = [
  "bitflags 2.13.2",
  "errno",
@@ -876,6 +895,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "services"
+version = "0.1.0"
+dependencies = [
+ "mecha-wayland",
+]
+
+[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -922,16 +948,18 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.16.3"
+version = "1.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
+checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
 
 [[package]]
 name = "status-bar"
 version = "0.1.0"
 dependencies = [
+ "assets",
  "mecha-wayland",
  "screen",
+ "services",
 ]
 
 [[package]]
@@ -990,6 +1018,7 @@ dependencies = [
 [[package]]
 name = "text-input"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "interactivity",
@@ -1001,6 +1030,7 @@ dependencies = [
 [[package]]
 name = "theme"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "geometry",
@@ -1199,6 +1229,7 @@ dependencies = [
 [[package]]
 name = "wayland"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "bitflags 2.13.2",
@@ -1224,6 +1255,7 @@ dependencies = [
 [[package]]
 name = "widgets"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "atlas",
@@ -1237,6 +1269,7 @@ dependencies = [
 [[package]]
 name = "window"
 version = "0.1.0"
+source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
 dependencies = [
  "app",
  "geometry",

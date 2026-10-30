@@ -9,7 +9,7 @@ use nav::core::{
 };
 use nav::shell::{NavModule, nav_window};
 use notifications::{Notifications, NotificationsModule};
-use quick_settings::QuickSettings;
+use quick_settings::{QuickSettingsModule, QuickSettingsScreen};
 use running_apps::RunningApps;
 use search::Search;
 use status_bar::{
@@ -109,7 +109,7 @@ fn navigation(cfg: NavConfig) -> NavModule {
                 LayoutStyle::default(),
             )
             .container(panel(NOTIFICATIONS, Notifications, Span::LeftHalf))
-            .container(panel(QUICK_SETTINGS, QuickSettings, Span::RightHalf)),
+            .container(panel(QUICK_SETTINGS, QuickSettingsScreen, Span::RightHalf)),
         )
         .window(nav_window(
             TOP_EDGE,
@@ -178,7 +178,8 @@ fn main() {
     app.add_module(navigation(NavConfig::default()))
         .add_module(StatusBarModule)
         .add_module(NotificationsModule)
-        .add_module(KeyboardModule);
+        .add_module(KeyboardModule)
+        .add_module(QuickSettingsModule);
 
     app.run();
 }

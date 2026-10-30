@@ -1,17 +1,16 @@
 pub mod indicators;
 mod module;
-pub mod services;
 pub mod status_bar;
-pub use services::{BluetoothModule, BluetoothStatus, UpowerModule, WifiModule, WifiStatus};
+pub use services::{BluetoothModule, BluetoothStatus, NetworkManagerModule, UpowerModule};
 
 use mecha_wayland::prelude::*;
 
 pub use indicators::*;
 pub use module::{StatusBarModule, StatusBarScreen};
-pub use status_bar::{StatusBar, StatusBarBuilder, StatusUpdate, status_bar};
+pub use status_bar::{StatusBar, StatusBarBuilder, status_bar};
 
 /// Bundled GeistMono font for status bar numeric text (such as battery percentage).
-pub const GEIST_MONO_BYTES: &[u8] = include_bytes!("../assets/fonts/GeistMono-Regular.ttf");
+pub use assets::fonts::GEIST_MONO as GEIST_MONO_BYTES;
 
 /// Default icon dimension in pixels (matches 20x20 design specification).
 pub const DEFAULT_ICON_SIZE: u32 = 20;
@@ -107,7 +106,7 @@ mod tests {
             app.widget::<CellularIndicator>(bar_widget.cellular)
                 .unwrap()
                 .state(),
-            CellularState::Full
+            CellularState::Disabled
         );
         assert_eq!(
             app.widget::<AirplaneIndicator>(bar_widget.airplane)
@@ -193,14 +192,31 @@ mod tests {
         app.tick();
 
         let bar_widget = *app.widget::<StatusBar>(bar).unwrap();
-        app.emit(StatusUpdate::Bluetooth(BluetoothState::On), bar);
-        app.emit(StatusUpdate::Wifi(WifiState::High), bar);
+        app.emit(
+            ::services::BluetoothStateChanged {
+                state: ::services::BluetoothState::On,
+            },
+            bar,
+        );
+        app.emit(
+            ::services::StateUpdate {
+                state: ::services::WifiState::Connected,
+            },
+            bar,
+        );
+        app.emit(
+            ::services::APUpdate {
+                ssid: Some(b"Office".to_vec()),
+                strength: 100,
+            },
+            bar,
+        );
         app.tick();
 
         // Initially:
         // Airplane is Disabled (Hidden)
         // Bluetooth is On (Visible)
-        // Cellular is Full (Visible)
+        // Cellular is Disabled (Hidden)
         // Wifi is High (Visible)
         assert_eq!(
             app.component::<LayoutStyle>(bar_widget.airplane.id())
@@ -220,7 +236,7 @@ mod tests {
                 .display,
             Display::Hidden
         );
-        assert_ne!(
+        assert_eq!(
             app.component::<LayoutStyle>(bar_widget.cellular.id())
                 .unwrap()
                 .display,
@@ -263,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn test_status_update_event() {
+    fn test_battery_percentage_label() {
         let mut app = App::new();
         app.add_module(LayoutModule)
             .add_module(PaintModule)
@@ -286,52 +302,6 @@ mod tests {
 
         let bar_widget = *app.widget::<StatusBar>(bar).unwrap();
 
-        // Emit StatusUpdate directly to bar
-        app.emit(StatusUpdate::Wifi(WifiState::Low), bar);
-        app.emit(StatusUpdate::Bluetooth(BluetoothState::Off), bar);
-        app.emit(StatusUpdate::Cellular(CellularState::None), bar);
-        app.emit(StatusUpdate::Airplane(AirplaneState::Enabled), bar);
-        app.emit(StatusUpdate::Battery(Some(42)), bar);
-        app.emit(StatusUpdate::Glyph(GlyphState::DEMO), bar);
-        app.tick();
-
-        assert_eq!(
-            app.widget::<WifiIndicator>(bar_widget.wifi)
-                .unwrap()
-                .state(),
-            WifiState::Low
-        );
-        assert_eq!(
-            app.widget::<BluetoothIndicator>(bar_widget.bluetooth)
-                .unwrap()
-                .state(),
-            BluetoothState::Off
-        );
-        assert_eq!(
-            app.widget::<CellularIndicator>(bar_widget.cellular)
-                .unwrap()
-                .state(),
-            CellularState::None
-        );
-        assert_eq!(
-            app.widget::<AirplaneIndicator>(bar_widget.airplane)
-                .unwrap()
-                .state(),
-            AirplaneState::Enabled
-        );
-        assert_eq!(
-            app.widget::<BatteryPercentage>(bar_widget.battery)
-                .unwrap()
-                .percentage(),
-            Some(42)
-        );
-        assert_eq!(
-            app.widget::<GlyphIndicator>(bar_widget.glyph)
-                .unwrap()
-                .state(),
-            GlyphState::DEMO
-        );
-
         // Unavailable and empty are distinct; updates can restore a percentage.
         for (input, expected, label) in [
             (None, None, "N/A"),
@@ -340,7 +310,10 @@ mod tests {
             (None, None, "N/A"),
             (Some(42), Some(42), "42%"),
         ] {
-            app.emit(StatusUpdate::Battery(input), bar);
+            app.emit(
+                ::services::BatteryPercentageChanged { percentage: input },
+                bar,
+            );
             app.tick();
 
             let battery = app.widget::<BatteryPercentage>(bar_widget.battery).unwrap();
@@ -352,6 +325,124 @@ mod tests {
                 .widget::<mecha_wayland::prelude::Text>(text.native())
                 .unwrap();
             assert_eq!(native.string, label);
+        }
+    }
+
+    #[test]
+    fn test_shared_service_events() {
+        let mut app = App::new();
+        app.add_module(LayoutModule)
+            .add_module(PaintModule)
+            .add_module(MechanixTheme::dark())
+            .insert_resource(Atlas::new());
+
+        let font = app
+            .resource_mut::<Atlas>()
+            .add_font(GEIST_MONO_BYTES)
+            .expect("GeistMono loads");
+        app.insert_resource(FontBook::new(font));
+
+        let icons = StatusIcons::load(&mut app.resource_mut::<Atlas>(), DEFAULT_ICON_SIZE)
+            .expect("icons load");
+        app.insert_resource(icons);
+
+        let root = app.root();
+        let bar = app.spawn(root, status_bar());
+        app.tick();
+        let bar_widget = *app.widget::<StatusBar>(bar).unwrap();
+
+        for (state, expected) in [
+            (::services::BluetoothState::On, BluetoothState::On),
+            (
+                ::services::BluetoothState::Connected {
+                    count: 2,
+                    name: None,
+                },
+                BluetoothState::Connected,
+            ),
+            (::services::BluetoothState::Off, BluetoothState::Off),
+        ] {
+            app.emit(::services::BluetoothStateChanged { state }, bar);
+            app.tick();
+            assert_eq!(
+                app.widget::<BluetoothIndicator>(bar_widget.bluetooth)
+                    .unwrap()
+                    .state(),
+                expected
+            );
+        }
+
+        // Strength only shows once NetworkManager reports a connection.
+        app.emit(
+            ::services::APUpdate {
+                ssid: Some(b"Office".to_vec()),
+                strength: 100,
+            },
+            bar,
+        );
+        app.tick();
+        assert_eq!(
+            app.widget::<WifiIndicator>(bar_widget.wifi)
+                .unwrap()
+                .state(),
+            WifiState::Disabled
+        );
+        app.emit(
+            ::services::StateUpdate {
+                state: ::services::WifiState::Connected,
+            },
+            bar,
+        );
+        for (strength, expected) in [
+            (0, WifiState::None),
+            (24, WifiState::None),
+            (25, WifiState::Low),
+            (49, WifiState::Low),
+            (50, WifiState::Medium),
+            (74, WifiState::Medium),
+            (75, WifiState::High),
+        ] {
+            app.emit(
+                ::services::APUpdate {
+                    ssid: Some(b"Office".to_vec()),
+                    strength,
+                },
+                bar,
+            );
+            app.tick();
+            assert_eq!(
+                app.widget::<WifiIndicator>(bar_widget.wifi)
+                    .unwrap()
+                    .state(),
+                expected
+            );
+        }
+        for (state, expected) in [
+            (::services::WifiState::Disconnected, WifiState::Disconnected),
+            (::services::WifiState::Connecting, WifiState::Disconnected),
+            (::services::WifiState::Connected, WifiState::High),
+            (::services::WifiState::Off, WifiState::Disabled),
+            (::services::WifiState::Unavailable, WifiState::Disabled),
+        ] {
+            app.emit(::services::StateUpdate { state }, bar);
+            app.tick();
+            assert_eq!(
+                app.widget::<WifiIndicator>(bar_widget.wifi)
+                    .unwrap()
+                    .state(),
+                expected
+            );
+        }
+
+        for percentage in [Some(42), None] {
+            app.emit(::services::BatteryPercentageChanged { percentage }, bar);
+            app.tick();
+            assert_eq!(
+                app.widget::<BatteryPercentage>(bar_widget.battery)
+                    .unwrap()
+                    .percentage(),
+                percentage
+            );
         }
     }
 

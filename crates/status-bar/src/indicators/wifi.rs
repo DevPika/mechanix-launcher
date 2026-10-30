@@ -2,14 +2,7 @@ use mecha_wayland::prelude::*;
 
 use crate::indicators::{indicator_layout, load_svg_icon};
 
-mod svg {
-    pub const HIGH: &[u8] = include_bytes!("../../assets/wifi/wifi-high.svg");
-    pub const MEDIUM: &[u8] = include_bytes!("../../assets/wifi/wifi-medium.svg");
-    pub const LOW: &[u8] = include_bytes!("../../assets/wifi/wifi-low.svg");
-    pub const NONE: &[u8] = include_bytes!("../../assets/wifi/wifi-none.svg");
-    pub const SLASH: &[u8] = include_bytes!("../../assets/wifi/wifi-slash.svg");
-    pub const X: &[u8] = include_bytes!("../../assets/wifi/wifi-x.svg");
-}
+use assets::icons::wifi as svg;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WifiState {
@@ -23,6 +16,24 @@ pub enum WifiState {
 }
 
 impl WifiState {
+    /// Icon for a NetworkManager state. `strength` (0-100, zero when unknown)
+    /// only matters while connected.
+    pub fn from_service(state: ::services::WifiState, strength: u8) -> Self {
+        use ::services::WifiState as Service;
+        match state {
+            Service::Connected => match strength {
+                0..=24 => Self::None,
+                25..=49 => Self::Low,
+                50..=74 => Self::Medium,
+                _ => Self::High,
+            },
+            Service::On | Service::Disconnected | Service::Connecting | Service::Disconnecting => {
+                Self::Disconnected
+            }
+            Service::Unavailable | Service::Off => Self::Disabled,
+        }
+    }
+
     #[inline]
     pub fn is_visible(&self) -> bool {
         !matches!(self, Self::Disabled)
@@ -68,6 +79,9 @@ pub struct WifiIndicator {
     pub icons: WifiIcons,
     pub state: WifiState,
     pub icon_node: Handle<Icon>,
+    /// Latest service updates; `StateUpdate` and `APUpdate` arrive separately.
+    connection: ::services::WifiState,
+    strength: u8,
 }
 
 pub fn wifi_indicator(icons: WifiIcons) -> WifiIndicatorBuilder {
@@ -112,6 +126,8 @@ impl Widget for WifiIndicator {
             icons: b.icons,
             state: b.state,
             icon_node,
+            connection: ::services::WifiState::Unavailable,
+            strength: 0,
         }
     }
 }
@@ -126,6 +142,8 @@ impl WifiIndicator {
 pub trait WifiIndicatorContext {
     fn state(&mut self) -> WifiState;
     fn set_state(&mut self, state: WifiState);
+    fn set_connection(&mut self, connection: ::services::WifiState);
+    fn set_strength(&mut self, strength: u8);
 }
 
 impl WifiIndicatorContext for Context<'_, WifiIndicator> {
@@ -147,5 +165,17 @@ impl WifiIndicatorContext for Context<'_, WifiIndicator> {
             let icon_node = self.me().icon_node;
             self.at(icon_node).unwrap().set_sprite(sprite);
         }
+    }
+
+    fn set_connection(&mut self, connection: ::services::WifiState) {
+        self.me().connection = connection;
+        let state = WifiState::from_service(connection, self.me().strength);
+        self.set_state(state);
+    }
+
+    fn set_strength(&mut self, strength: u8) {
+        self.me().strength = strength;
+        let state = WifiState::from_service(self.me().connection, strength);
+        self.set_state(state);
     }
 }

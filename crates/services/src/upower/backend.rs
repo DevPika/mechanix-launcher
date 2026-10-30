@@ -1,58 +1,34 @@
-use crate::{StatusBar, StatusUpdate};
+//! Read-only UPower client on mecha-wayland's system D-Bus connection.
 use mecha_wayland::prelude::*;
 
-#[cfg(test)]
-#[path = "test/upower.rs"]
-mod tests;
-
-// A Rust man's C enum
-mod upower_types {
+pub(super) mod upower_types {
     type EType = u32;
     pub const UNKNOWN: EType = 0;
     pub const BATTERY: EType = 2;
 }
 
-struct UpowerBattery {
-    property_changed: MatchId,
-    property_read: CallId, // The latest GetAll request, including refreshes.
+pub(super) struct UpowerBattery {
+    pub(super) property_changed: MatchId,
+    pub(super) property_read: CallId, // The latest GetAll request, including refreshes.
 
-    is_present: bool,
-    device_type: u32,
+    pub(super) is_present: bool,
+    pub(super) device_type: u32,
 }
 impl Resource for UpowerBattery {}
 
-const UPOWER: &str = "org.freedesktop.UPower";
-const DISPLAY_DEVICE: &str = "/org/freedesktop/UPower/devices/DisplayDevice";
-const DEVICE_INTERFACE: &str = "org.freedesktop.UPower.Device";
-
-pub struct UpowerModule;
-impl Module for UpowerModule {
-    fn install(self, app: &mut App) {
-        // watch and property_read are our MatchId and CallId
-        let (watch, property_read) = {
-            let mut dbus = app.resource_mut::<DBus>();
-            let mut bus = dbus.system();
-
-            let watch = bus.watch_properties(UPOWER, DISPLAY_DEVICE, DEVICE_INTERFACE);
-
-            let property_read = bus.object(UPOWER, DISPLAY_DEVICE).get_all(DEVICE_INTERFACE);
-
-            (watch, property_read)
-        };
-
-        app.insert_resource(UpowerBattery {
-            property_read,
-            property_changed: watch,
-            is_present: false,                  // to be filled by on_reply
-            device_type: upower_types::UNKNOWN, // to be filled by on_reply
-        });
-
-        app.system(on_reply).system(on_property_changed);
-    }
+pub struct BatteryPercentageChanged {
+    /// event to send when the battery percentage changes
+    /// None means the battery is invalid
+    pub percentage: Option<u8>,
 }
+impl Event for BatteryPercentageChanged {}
+
+pub(super) const UPOWER: &str = "org.freedesktop.UPower";
+pub(super) const DISPLAY_DEVICE: &str = "/org/freedesktop/UPower/devices/DisplayDevice";
+pub(super) const DEVICE_INTERFACE: &str = "org.freedesktop.UPower.Device";
 
 /// Handle the latest GetAll snapshot, whether initial or a refresh.
-fn on_reply(app: &mut App, e: &MethodReply) {
+pub(super) fn on_reply(app: &mut App, e: &MethodReply) {
     if e.call != app.resource::<UpowerBattery>().property_read {
         return;
     }
@@ -80,14 +56,13 @@ fn on_reply(app: &mut App, e: &MethodReply) {
     } else {
         None
     };
-
-    // TODO: main.rs discards the NodeID of the main status bar, store it so we
-    // can send events easily
-    let bars: Vec<NodeId> = app.widgets::<StatusBar>().map(|(id, _)| id).collect();
-    app.emit(StatusUpdate::Battery(percentage), bars);
+    app.emit(
+        BatteryPercentageChanged { percentage },
+        app.descendants(app.root()).collect::<Vec<_>>(),
+    );
 }
 
-fn on_property_changed(app: &mut App, e: &SignalReceived) {
+pub(super) fn on_property_changed(app: &mut App, e: &SignalReceived) {
     if !e
         .matches
         .contains(&app.resource::<UpowerBattery>().property_changed)
@@ -95,13 +70,14 @@ fn on_property_changed(app: &mut App, e: &SignalReceived) {
         return;
     }
 
-    // check if anything we care about is invalidated
     let (_, changed, invalidated) =
         PropertiesChanged::parse(&e.msg).expect("UPower: invalid PropertiesChanged signal");
 
     if invalidated
         .iter()
         .any(|name| matches!(name.as_str(), "IsPresent" | "Type" | "Percentage"))
+        || changed.contains_key("IsPresent")
+        || changed.contains_key("Type")
     {
         let call = app
             .resource_mut::<DBus>()
@@ -111,21 +87,26 @@ fn on_property_changed(app: &mut App, e: &SignalReceived) {
         app.resource_mut::<UpowerBattery>().property_read = call;
         return;
     }
-
-    if let Some(pct) = battery_percentage(&changed) {
-        let bars: Vec<NodeId> = app.widgets::<StatusBar>().map(|(id, _)| id).collect();
-        app.emit(StatusUpdate::Battery(Some(pct)), bars);
+    if let Some(percentage) = battery_percentage(&changed)
+        && battery_valid(app)
+    {
+        app.emit(
+            BatteryPercentageChanged {
+                percentage: Some(percentage),
+            },
+            app.descendants(app.root()).collect::<Vec<_>>(),
+        );
     }
 }
 
-fn battery_valid(app: &App) -> bool {
+pub(super) fn battery_valid(app: &App) -> bool {
     let bat_resource = app.resource::<UpowerBattery>();
     bat_resource.is_present && bat_resource.device_type == upower_types::BATTERY
 }
 
 /// Check battery percentage from a message. Assume battery is valid
 /// None means the passed in message doesn't have a percentage
-fn battery_percentage(properties: &PropMap) -> Option<u8> {
+pub(super) fn battery_percentage(properties: &PropMap) -> Option<u8> {
     let percentage = properties
         .get_as::<f64>("Percentage")?
         .expect("UPower: invalid Percentage");
