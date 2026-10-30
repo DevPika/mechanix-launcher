@@ -24,6 +24,7 @@ const BUNDLED: &[(&str, &[u8])] = &[
     include_icon!("key-enter-symbolic"),
     include_icon!("key-shift-symbolic"),
     include_icon!("preferences-system-symbolic"),
+    include_icon!("view-reserve-bottom-symbolic"),
 ];
 
 /// The rasterized icon sprites, looked up by the name a layout uses.

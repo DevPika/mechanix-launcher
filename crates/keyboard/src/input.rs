@@ -11,7 +11,9 @@ use crate::layout::{KeyAction, Modifier};
 use crate::protocol::input_method::{self, InputMethodState};
 use crate::protocol::virtual_keyboard::{self, VirtualKeyboardState};
 use crate::view::switch_view;
+use crate::visibility::KeyboardVisibilityExt;
 use crate::widget::keyboard::Keyboard;
+use crate::zone::toggle_exclusive_zone;
 
 /// Route a tapped key's action. View switches and modifier latches mutate the
 /// Keyboard widget state; every other action is a keystroke the virtual
@@ -58,6 +60,12 @@ pub(crate) fn dispatch(ctx: &mut Context<'_, Keyboard>, action: &KeyAction) {
                 }
             }
             consume_latch(ctx);
+        }
+        KeyAction::HideKeyboard => {
+            ctx.set_keyboard_visibility(false);
+        }
+        KeyAction::ToggleExclusiveZone => {
+            toggle_exclusive_zone(ctx);
         }
         KeyAction::Unhandled(name) => {
             tracing::info!(action = %name, "tapped key with no wired action");

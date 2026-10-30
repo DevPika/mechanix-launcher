@@ -9,13 +9,15 @@ use crate::layout::tokens::Fonts;
 use crate::protocol::input_method::InputMethodModule;
 use crate::protocol::virtual_keyboard::VirtualKeyboardModule;
 use crate::view::on_text_input_focused;
-use crate::widget::surface::KeyboardUIBuilder;
+use crate::widget::surface::{KeyboardUI, KeyboardUIBuilder};
+use crate::zone::ExclusiveZone;
 
 /// Installs the on-screen keyboard: binds `zwp_virtual_keyboard_v1` and
 /// `zwp_input_method_v2`, loads the keymap, fonts and icons, and spawns the
-/// keyboard's own bottom-anchored layer surface. Unlike the screens, the
-/// keyboard owns its window (it resizes the surface as it shows and hides), so
-/// it is not placed by the nav.
+/// keyboard's own bottom-anchored layer surface, unmapped until shown. Unlike
+/// the screens, the keyboard owns its window (it maps and unmaps the surface
+/// as it shows and hides), so it is not placed by the nav; the host shows it
+/// with [`show_keyboard`](crate::show_keyboard), e.g. from a nav action.
 ///
 /// Expects the host to have installed the [`WaylandModule`] (with [`WlSeat`]
 /// and [`ZwlrLayerShellV1`] bound), the `WindowModule`, `InteractivityModule`
@@ -32,6 +34,7 @@ impl Module for KeyboardModule {
         let keymap = layout::load_keymap();
 
         app.insert_resource(LatchedState::default());
+        app.insert_resource(ExclusiveZone::default());
 
         // Virtual-keyboard-v1 and input-method-v2 modules — bind their globals
         // conditionally from `Globals` and handle their protocol events. These
@@ -48,13 +51,28 @@ impl Module for KeyboardModule {
         app.insert_resource(icons);
 
         let root = app.root();
-        app.spawn(
-            root,
-            KeyboardUIBuilder {
+        let ui = app
+            .spawn(
                 root,
-                fonts,
-                keymap,
-            },
-        );
+                KeyboardUIBuilder {
+                    root,
+                    fonts,
+                    keymap,
+                },
+            )
+            .id();
+        let surface = app
+            .widgets::<KeyboardUI>()
+            .find(|(id, _)| *id == ui)
+            .unwrap()
+            .1
+            .surface;
+        app.insert_resource(surface);
+
+        // Starts hidden: the surface is created unmapped.
+        if app.has_resource::<Surfaces>() {
+            let (mut surfaces, mut wl) = app.query::<(ResMut<Surfaces>, ResMut<Wayland>)>();
+            surfaces.set_mapped(surface.window, false, &mut wl);
+        }
     }
 }

@@ -17,5 +17,7 @@ mod protocol;
 mod view;
 mod visibility;
 mod widget;
+mod zone;
 
 pub use module::KeyboardModule;
+pub use visibility::show_keyboard;
