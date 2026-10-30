@@ -1,5 +1,6 @@
 use app_drawer::AppDrawer;
 use home::Home;
+use keyboard::KeyboardModule;
 use mecha_wayland::mechanix_widgets::prelude::FontBook;
 use mecha_wayland::prelude::*;
 use nav::core::{
@@ -132,6 +133,12 @@ fn navigation(cfg: NavConfig) -> NavModule {
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
     let mut app = App::new();
     app.add_module(LayoutModule)
         .add_module(PaintModule)
@@ -170,7 +177,8 @@ fn main() {
 
     app.add_module(navigation(NavConfig::default()))
         .add_module(StatusBarModule)
-        .add_module(NotificationsModule);
+        .add_module(NotificationsModule)
+        .add_module(KeyboardModule);
 
     app.run();
 }

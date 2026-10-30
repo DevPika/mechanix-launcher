@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 mecha-wayland.workspace = true
 status-bar.workspace = true
+keyboard.workspace = true
 screen.workspace = true
 home.workspace = true
 app-drawer.workspace = true
@@ -14,6 +15,8 @@ running-apps.workspace = true
 notifications.workspace = true
 quick-settings.workspace = true
 nav.workspace = true
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [workspace]
 members = [
@@ -28,6 +31,7 @@ members = [
     "crates/notifications",
     "crates/quick-settings",
     "crates/nav",
+    "crates/keyboard",
 ]
 resolver = "3"
 
@@ -43,6 +47,7 @@ running-apps = { path = "crates/running-apps" }
 notifications = { path = "crates/notifications" }
 quick-settings = { path = "crates/quick-settings" }
 nav = { path = "crates/nav" }
+keyboard = { path = "crates/keyboard" }
 
 # Local development override — assumes mecha-wayland is cloned as a sibling
 # directory: ../mecha-wayland
