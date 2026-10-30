@@ -43,9 +43,8 @@ pub(crate) fn indicator_layout(visible: bool) -> LayoutStyle {
 #[inline]
 pub(crate) fn load_svg_icon(
     atlas: &mut Atlas,
-    bytes: &[u8],
+    bytes: &'static [u8],
     master: u32,
 ) -> Result<SpriteId, Error> {
-    let bitmap = Bitmap::from_svg(bytes, master)?;
-    atlas.insert(Class::Icon, &bitmap)
+    atlas.insert_svg(bytes, master)
 }
