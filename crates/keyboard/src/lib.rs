@@ -1,0 +1,21 @@
+//! An on-screen keyboard built with themed widgets on the mecha-wayland UI
+//! core. Install it into a host app with [`KeyboardModule`].
+//!
+//! The keymap (parsed from `resources/layout.yaml`) drives which keys appear and
+//! what they do. View switching (Shift `locking`, `set_view`) and one-shot
+//! modifier latching (Ctrl, Alt) are supported. Text keys commit through
+//! `zwp_input_method_v2` when a text input is focused, falling back to
+//! `zwp_virtual_keyboard_v1` keysym transport.
+
+#![recursion_limit = "1024"]
+
+mod input;
+mod latch;
+mod layout;
+mod module;
+mod protocol;
+mod view;
+mod visibility;
+mod widget;
+
+pub use module::KeyboardModule;

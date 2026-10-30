@@ -1,41 +1,27 @@
 use mecha_wayland::prelude::*;
-use screen::{Screen, placeholder_page};
+use screen::Screen;
+
+pub mod card;
+pub mod card_list;
+pub mod dbus;
+pub mod dbus_spec;
+pub mod expiry_timeout;
+pub mod markup;
+pub mod module;
+pub mod notification_store;
+pub mod notifications;
+pub mod notify;
+pub mod notify_signal;
+pub mod rich_text;
+pub mod style;
+
+use crate::notifications::NotificationsCenterBuilder;
+pub use module::NotificationsModule;
 
 pub struct Notifications;
 
 impl Screen for Notifications {
     fn build(&self, app: &mut App, parent: NodeId) -> NodeId {
-        placeholder_page(app, parent, "Notifications")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use mecha_wayland::mechanix_widgets::prelude::{FontBook, Text};
-    use status_bar::GEIST_MONO_BYTES;
-
-    #[test]
-    fn builds_one_label() {
-        let mut app = App::new();
-        app.add_module(LayoutModule)
-            .add_module(PaintModule)
-            .add_module(MechanixTheme::dark())
-            .insert_resource(Atlas::new());
-        let font = app
-            .resource_mut::<Atlas>()
-            .add_font(GEIST_MONO_BYTES)
-            .expect("GeistMono loads");
-        app.insert_resource(FontBook::new(font));
-
-        let root = app.root();
-        let page = Notifications.build(&mut app, root);
-        app.tick();
-
-        let texts: Vec<_> = app
-            .descendants(page)
-            .filter(|n| app.widget::<Text>(*n).is_some())
-            .collect();
-        assert_eq!(texts.len(), 1);
+        app.spawn(parent, NotificationsCenterBuilder).id()
     }
 }

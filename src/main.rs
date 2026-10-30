@@ -1,5 +1,6 @@
 use app_drawer::AppDrawer;
 use home::Home;
+use keyboard::KeyboardModule;
 use mecha_wayland::mechanix_widgets::prelude::FontBook;
 use mecha_wayland::prelude::*;
 use nav::core::{
@@ -7,7 +8,7 @@ use nav::core::{
     container, swipe,
 };
 use nav::shell::{NavModule, nav_window};
-use notifications::Notifications;
+use notifications::{Notifications, NotificationsModule};
 use quick_settings::{QuickSettingsModule, QuickSettingsScreen};
 use running_apps::RunningApps;
 use search::Search;
@@ -132,6 +133,12 @@ fn navigation(cfg: NavConfig) -> NavModule {
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
     let mut app = App::new();
     app.add_module(LayoutModule)
         .add_module(PaintModule)
@@ -154,7 +161,7 @@ fn main() {
     app.insert_resource(icons);
 
     app.add_module(RingModule::default())
-        .add_module(DBusModule::new().system())
+        .add_module(DBusModule::new().system().session())
         .add_module(
             WaylandModule::new()
                 .bind::<WlCompositor>()
@@ -170,6 +177,8 @@ fn main() {
 
     app.add_module(navigation(NavConfig::default()))
         .add_module(StatusBarModule)
+        .add_module(NotificationsModule)
+        .add_module(KeyboardModule)
         .add_module(QuickSettingsModule);
 
     app.run();
