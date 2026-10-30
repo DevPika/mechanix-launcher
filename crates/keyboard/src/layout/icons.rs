@@ -24,6 +24,7 @@ const BUNDLED: &[(&str, &[u8])] = &[
     include_icon!("key-enter-symbolic"),
     include_icon!("key-shift-symbolic"),
     include_icon!("preferences-system-symbolic"),
+    include_icon!("view-reserve-bottom-symbolic"),
 ];
 
 /// The rasterized icon sprites, looked up by the name a layout uses.
@@ -39,9 +40,9 @@ impl Icons {
     pub fn load(atlas: &mut Atlas, size: u32) -> Self {
         let mut icons: HashMap<String, SpriteId> = HashMap::new();
         for &(name, bytes) in BUNDLED {
-            let bitmap = Bitmap::from_svg(bytes, size)
-                .unwrap_or_else(|e| panic!("bundled icon {name:?} loads: {e:?}"));
-            let sprite = atlas.insert(Class::Icon, &bitmap).unwrap();
+            let sprite = atlas
+                .insert_svg(bytes, size)
+                .unwrap_or_else(|e| panic!("bundled icon {name:?} loads: {e}"));
             icons.insert(name.to_owned(), sprite);
         }
         Self { icons }

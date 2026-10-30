@@ -15,6 +15,9 @@ pub struct NavConfig {
     pub velocity_min_span: Duration,
     pub fade: Duration,
     pub bottom_strip_height: f32,
+    /// Width of each corner [`Span`](super::Span), as a fraction of the
+    /// area's width.
+    pub corner_fraction: f32,
 }
 
 impl Default for NavConfig {
@@ -30,6 +33,7 @@ impl Default for NavConfig {
             velocity_min_span: Duration::from_millis(8),
             fade: Duration::from_millis(160),
             bottom_strip_height: 20.0,
+            corner_fraction: 0.25,
         }
     }
 }

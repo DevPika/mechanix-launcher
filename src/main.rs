@@ -1,6 +1,6 @@
 use app_drawer::AppDrawer;
 use home::Home;
-use keyboard::KeyboardModule;
+use keyboard::{KeyboardModule, show_keyboard};
 use mecha_wayland::mechanix_widgets::prelude::FontBook;
 use mecha_wayland::prelude::*;
 use nav::core::{
@@ -44,8 +44,15 @@ fn role(layer: Layer, anchor: Anchor, exclusive_zone: i32, namespace: &str) -> R
     })
 }
 
+/// A quick swipe up from the middle of the bottom edge; the corners are the
+/// keyboard's.
 fn bottom_quick() -> nav::core::Swipe {
-    swipe(BOTTOM_EDGE, Direction::Up, Timing::Quick)
+    swipe(BOTTOM_EDGE, Direction::Up, Timing::Quick).span(Span::Middle)
+}
+
+/// Any swipe up from one bottom corner, quick or held: shows the keyboard.
+fn bottom_corner(span: Span) -> nav::core::Swipe {
+    swipe(BOTTOM_EDGE, Direction::Up, Timing::Any).span(span)
 }
 
 /// A panel that pulls down from its half of the top edge and closes on an up swipe.
@@ -77,10 +84,15 @@ fn navigation(cfg: NavConfig) -> NavModule {
         )
         .initially_open();
     let running = container(RUNNING, RunningApps)
-        .open(swipe(BOTTOM_EDGE, Direction::Up, Timing::Held), INSTANT)
+        .open(
+            swipe(BOTTOM_EDGE, Direction::Up, Timing::Held).span(Span::Middle),
+            INSTANT,
+        )
         .close(bottom_quick(), INSTANT);
 
     NavModule::new(cfg)
+        .action(bottom_corner(Span::LeftCorner), show_keyboard)
+        .action(bottom_corner(Span::RightCorner), show_keyboard)
         .window(
             nav_window(
                 HOME,
@@ -182,4 +194,82 @@ fn main() {
         .add_module(QuickSettingsModule);
 
     app.run();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The launcher's UI as `main` builds it, without the compositor and
+    /// D-Bus: the theme, the font, the status icons, every nav window and
+    /// screen, and the keyboard.
+    fn launcher() -> App {
+        let mut app = App::new();
+        app.add_module(LayoutModule)
+            .add_module(PaintModule)
+            .add_module(WindowModule)
+            .add_module(InteractivityModule)
+            .add_module(AnimationModule)
+            .add_module(RenderModule::default())
+            .insert_resource(Atlas::new());
+        app.add_module(MechanixTheme::dark());
+        let font = app
+            .resource_mut::<Atlas>()
+            .add_font(GEIST_MONO_BYTES)
+            .expect("GeistMono font loads");
+        app.insert_resource(FontBook::new(font));
+        let icons = StatusIcons::load(&mut app.resource_mut::<Atlas>(), DEFAULT_ICON_SIZE)
+            .expect("Status bar icons load");
+        app.insert_resource(icons);
+        // PresentationModule registers Role; it needs a live compositor.
+        app.register_component::<Role>();
+        app.add_module(navigation(NavConfig::default()));
+        keyboard::spawn_ui(&mut app);
+        app.tick();
+        app
+    }
+
+    /// `(mono, colour)` pages: glyph and icon pages, then image pages.
+    fn pages(app: &App) -> (u32, u32) {
+        let atlas = app.resource::<Atlas>();
+        let (mut mono, mut color) = (0, 0);
+        for page in atlas.pages() {
+            match atlas.class(page.id()) {
+                Class::Glyph | Class::Icon => mono += 1,
+                Class::Image => color += 1,
+                Class::External => {}
+            }
+        }
+        (mono, color)
+    }
+
+    /// Rebuild at `scale` and rescale every window's tree, as presentation
+    /// does for a window's preferred scale.
+    fn rescale(app: &mut App, scale: f32) {
+        assert!(app.resource_mut::<Atlas>().set_scale(scale));
+        let windows: Vec<NodeId> = app.resource::<Windows>().iter().collect();
+        let mut targets = Vec::new();
+        for w in windows {
+            targets.push(w);
+            targets.extend(app.descendants(w));
+        }
+        app.emit(Rescaled, targets);
+        app.tick();
+    }
+
+    #[test]
+    fn the_launcher_fits_the_default_budget_at_1x_and_2x() {
+        let budget = Budget::default();
+        let mut app = launcher();
+        let at_1x = pages(&app);
+        rescale(&mut app, 2.0);
+        let at_2x = pages(&app);
+        eprintln!("pages (mono, colour): 1x {at_1x:?}, 2x {at_2x:?}");
+        for (scale, (mono, color)) in [(1, at_1x), (2, at_2x)] {
+            assert!(
+                mono <= budget.mono_pages && color <= budget.color_pages,
+                "{scale}x: {mono} mono and {color} colour pages over {budget:?}"
+            );
+        }
+    }
 }

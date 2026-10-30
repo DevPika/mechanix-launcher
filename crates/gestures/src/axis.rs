@@ -12,7 +12,10 @@ pub struct AxisLock {
 
 impl AxisLock {
     pub fn new(threshold: f32) -> Self {
-        Self { threshold, locked: None }
+        Self {
+            threshold,
+            locked: None,
+        }
     }
 
     pub fn update(&mut self, dx: f32, dy: f32) -> Option<Axis> {

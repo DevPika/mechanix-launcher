@@ -95,9 +95,6 @@ pub struct InputMethodModule;
 impl Module for InputMethodModule {
     fn install(self, app: &mut App) {
         app.insert_resource(InputMethodState::default());
-        // Keyboard surface visibility — starts hidden; IM2 `activate` and the
-        // debug visibility bar flip it through `KeyboardVisibilityExt`.
-        crate::visibility::install(app);
         init(app);
         app.system(on_input_method_event);
     }
@@ -190,7 +187,7 @@ fn on_input_method_event(app: &mut App, event: &ZwpInputMethodV2Event) {
                 }
                 // Only an activate/deactivate moves the surface, so other
                 // `done`s (e.g. surrounding-text updates) don't undo a manual
-                // toggle from the visibility bar.
+                // show or hide.
                 (prev.active != now.active).then_some(now.active)
             }
             ZwpInputMethodV2Event::Unavailable { .. } => {

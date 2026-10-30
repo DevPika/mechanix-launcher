@@ -67,6 +67,12 @@ pub enum Span {
     Whole,
     LeftHalf,
     RightHalf,
+    /// Starts within [`NavConfig::corner_fraction`] of the left end.
+    LeftCorner,
+    /// Starts within [`NavConfig::corner_fraction`] of the right end.
+    RightCorner,
+    /// Starts in neither corner.
+    Middle,
 }
 
 #[derive(Clone, Copy)]
@@ -91,12 +97,18 @@ impl Swipe {
         Swipe { span, ..self }
     }
 
-    fn starts_in_span(&self, g: &Gesture) -> bool {
-        let half = g.area_size.width / 2.0;
+    fn starts_in_span(&self, g: &Gesture, cfg: &NavConfig) -> bool {
+        let width = g.area_size.width;
+        let half = width / 2.0;
+        let corner = width * cfg.corner_fraction;
+        let x = g.start.x;
         match self.span {
             Span::Whole => true,
-            Span::LeftHalf => g.start.x < half,
-            Span::RightHalf => g.start.x >= half,
+            Span::LeftHalf => x < half,
+            Span::RightHalf => x >= half,
+            Span::LeftCorner => x < corner,
+            Span::RightCorner => x >= width - corner,
+            Span::Middle => x >= corner && x < width - corner,
         }
     }
 }
@@ -107,7 +119,7 @@ impl Trigger for Swipe {
     }
 
     fn detect(&self, g: &Gesture, phase: Phase, cfg: &NavConfig) -> Detect {
-        if !self.starts_in_span(g) || g.axis.is_some_and(|a| a != self.dir.axis()) {
+        if !self.starts_in_span(g, cfg) || g.axis.is_some_and(|a| a != self.dir.axis()) {
             return Detect::Ignore;
         }
         let needed = match self.timing {
@@ -267,6 +279,42 @@ mod tests {
             run(base.span(Span::LeftHalf), &g, Phase::Released),
             Detect::Commit
         );
+    }
+
+    #[test]
+    fn corner_spans_split_the_edge_into_corners_and_middle() {
+        // 600 wide at 25%: corners end at 150 and start at 450.
+        let at = |x: f32| {
+            gesture(
+                Size {
+                    width: 600.0,
+                    height: 20.0,
+                },
+                Point { x, y: 10.0 },
+                Point { x, y: -90.0 },
+                100,
+                (0.0, -1.5),
+            )
+        };
+        let spans = [Span::LeftCorner, Span::Middle, Span::RightCorner];
+        for (x, want) in [
+            (0.0, 0),
+            (149.0, 0),
+            (150.0, 1),
+            (449.0, 1),
+            (450.0, 2),
+            (599.0, 2),
+        ] {
+            for (i, span) in spans.into_iter().enumerate() {
+                let d = run(QUICK.span(span), &at(x), Phase::Released);
+                let expect = if i == want {
+                    Detect::Commit
+                } else {
+                    Detect::Ignore
+                };
+                assert_eq!(d, expect, "x {x}, {span:?}");
+            }
+        }
     }
 
     #[test]
