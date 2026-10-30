@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn corner_spans_split_the_edge_into_corners_and_middle() {
-        // 600 wide at 15%: corners end at 90 and start at 510.
+        // 600 wide at 25%: corners end at 150 and start at 450.
         let at = |x: f32| {
             gesture(
                 Size {
@@ -299,10 +299,10 @@ mod tests {
         let spans = [Span::LeftCorner, Span::Middle, Span::RightCorner];
         for (x, want) in [
             (0.0, 0),
-            (89.0, 0),
-            (90.0, 1),
-            (509.0, 1),
-            (510.0, 2),
+            (149.0, 0),
+            (150.0, 1),
+            (449.0, 1),
+            (450.0, 2),
             (599.0, 2),
         ] {
             for (i, span) in spans.into_iter().enumerate() {
