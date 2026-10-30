@@ -18,4 +18,4 @@ mod view;
 mod visibility;
 mod widget;
 
-pub use module::KeyboardModule;
+pub use module::{KeyboardModule, spawn_ui};

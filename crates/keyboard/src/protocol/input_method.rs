@@ -95,9 +95,6 @@ pub struct InputMethodModule;
 impl Module for InputMethodModule {
     fn install(self, app: &mut App) {
         app.insert_resource(InputMethodState::default());
-        // Keyboard surface visibility — starts hidden; IM2 `activate` and the
-        // debug visibility bar flip it through `KeyboardVisibilityExt`.
-        crate::visibility::install(app);
         init(app);
         app.system(on_input_method_event);
     }
