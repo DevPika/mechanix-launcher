@@ -2,13 +2,14 @@
 //! its container node, and applies the stack's first state.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use mecha_wayland::prelude::*;
 
-use super::apply::{ContainerNodes, Nav, NavWindow, apply, on_resized};
+use super::apply::{Action, ContainerNodes, Nav, NavWindow, apply, on_resized};
 use super::input::on_contact;
 use super::tick::on_frame;
-use crate::core::{AreaId, ContainerSpec, NavConfig, Stack};
+use crate::core::{AreaId, ContainerSpec, NavConfig, Stack, Trigger};
 
 /// One nav window: its touch area, layer role, layout and containers.
 pub struct WindowSpec {
@@ -53,6 +54,7 @@ impl WindowSpec {
 pub struct NavModule {
     cfg: NavConfig,
     windows: Vec<WindowSpec>,
+    actions: Vec<(Box<dyn Trigger>, Action)>,
 }
 
 impl NavModule {
@@ -60,7 +62,16 @@ impl NavModule {
         Self {
             cfg,
             windows: Vec::new(),
+            actions: Vec::new(),
         }
+    }
+
+    /// Runs `f` when a gesture commits `trigger`, moving no container: for
+    /// things that own their window, such as the on-screen keyboard. It
+    /// runs after the stack's state is applied.
+    pub fn action(mut self, trigger: impl Trigger, f: impl Fn(&mut App) + 'static) -> Self {
+        self.actions.push((Box::new(trigger), Rc::new(f)));
+        self
     }
 
     pub fn window(mut self, w: WindowSpec) -> Self {
@@ -112,7 +123,15 @@ impl Module for NavModule {
             });
         }
 
-        let (stack, rows) = Stack::new(self.cfg, roots);
+        let (mut stack, rows) = Stack::new(self.cfg, roots);
+        let actions = self
+            .actions
+            .into_iter()
+            .map(|(trigger, f)| {
+                stack.action(trigger);
+                f
+            })
+            .collect();
         // In z order, so a parent's node exists before its children's.
         let mut built = Vec::new();
         for (id, parent, screen) in rows {
@@ -152,6 +171,7 @@ impl Module for NavModule {
             sizes: HashMap::new(),
             pressed: Vec::new(),
             last_tick: None,
+            actions,
         });
         app.system(on_resized);
         app.system(on_contact);
