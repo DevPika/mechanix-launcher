@@ -13,7 +13,12 @@ pub struct VelocityTracker {
 
 impl VelocityTracker {
     pub fn new(window: Duration, stale: Duration, min_span: Duration) -> Self {
-        Self { window, stale, min_span, samples: VecDeque::new() }
+        Self {
+            window,
+            stale,
+            min_span,
+            samples: VecDeque::new(),
+        }
     }
 
     pub fn push(&mut self, t: Instant, x: f32, y: f32) {
@@ -93,7 +98,11 @@ mod tests {
         let t0 = Instant::now();
         let mut v = tracker();
         for i in 0..10u64 {
-            v.push(t0 + Duration::from_millis(i * 8), 5.0, 100.0 - 8.0 * i as f32);
+            v.push(
+                t0 + Duration::from_millis(i * 8),
+                5.0,
+                100.0 - 8.0 * i as f32,
+            );
         }
         let now = t0 + Duration::from_millis(72);
         let (vx, vy) = v.velocity(now);
