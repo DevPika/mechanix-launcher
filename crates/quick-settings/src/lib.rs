@@ -100,7 +100,7 @@ mod tests {
             .add_module(MechanixTheme::dark());
         let mut atlas = Atlas::new();
         let font = atlas
-            .add_font(include_bytes!("../assets/fonts/GeistMono-Regular.ttf"))
+            .add_font(assets::fonts::GEIST_MONO)
             .unwrap();
         app.insert_resource(atlas);
         app.insert_resource(FontBook::new(font));

@@ -10,12 +10,10 @@ const WIFI_MID_MIN_PERCENT: u8 = 25;
 const WIFI_HIGH_MIN_PERCENT: u8 = 75;
 
 mod svg {
-    pub const HIGH: &[u8] = include_bytes!("../../assets/wifi/wifi-high.svg");
-    pub const MID: &[u8] = include_bytes!("../../assets/wifi/wifi-medium.svg");
-    pub const LOW: &[u8] = include_bytes!("../../assets/wifi/wifi-low.svg");
-    pub const SLASH: &[u8] = include_bytes!("../../assets/wifi/wifi-slash.svg");
-    pub const X: &[u8] = include_bytes!("../../assets/wifi/wifi-x.svg");
-    pub const AIRPLANE: &[u8] = include_bytes!("../../assets/airplane.svg");
+    pub use assets::icons::AIRPLANE;
+    pub use assets::icons::wifi::{HIGH, SLASH, X};
+    // The tile has three strength levels, drawn with the 1-arc and dot-only icons.
+    pub use assets::icons::wifi::{LOW as MID, NONE as LOW};
 }
 
 pub struct Wifi {
@@ -286,7 +284,7 @@ mod tests {
         app.init_resource::<WifiSignals>().system(record_set_wifi);
         let font = app
             .resource_mut::<Atlas>()
-            .add_font(include_bytes!("../../assets/fonts/GeistMono-Regular.ttf"))
+            .add_font(assets::fonts::GEIST_MONO)
             .unwrap();
         app.insert_resource(FontBook::new(font));
         let wifi = app.spawn(

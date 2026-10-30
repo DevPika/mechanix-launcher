@@ -5,11 +5,7 @@ use super::build_tile;
 use crate::util::load_icon;
 use services::{BluetoothState, BluetoothStateChanged, ToggleBluetooth};
 
-mod svg {
-    pub const ON: &[u8] = include_bytes!("../../assets/bluetooth/bluetooth.svg");
-    pub const CONNECTED: &[u8] = include_bytes!("../../assets/bluetooth/bluetooth-connected.svg");
-    pub const SLASH: &[u8] = include_bytes!("../../assets/bluetooth/bluetooth-slash.svg");
-}
+use assets::icons::bluetooth as svg;
 
 pub struct Bluetooth {
     pub icon: Handle<Icon>,
@@ -30,7 +26,7 @@ impl Widget for Bluetooth {
     type Builder = BluetoothBuilder;
 
     fn build(_: Self::Builder, me: Handle<Self>, s: &mut Spawner<'_, Self>) -> Self {
-        let icon_on = load_icon(&mut s.resource_mut::<Atlas>(), svg::ON);
+        let icon_on = load_icon(&mut s.resource_mut::<Atlas>(), svg::DEFAULT);
         let icon_off = load_icon(&mut s.resource_mut::<Atlas>(), svg::SLASH);
         let icon_connected = load_icon(&mut s.resource_mut::<Atlas>(), svg::CONNECTED);
 

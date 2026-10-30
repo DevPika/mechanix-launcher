@@ -2,12 +2,7 @@ use mecha_wayland::prelude::*;
 
 use crate::indicators::{indicator_layout, load_svg_icon};
 
-mod svg {
-    pub const DEFAULT: &[u8] = include_bytes!("../../assets/bluetooth/bluetooth.svg");
-    pub const CONNECTED: &[u8] = include_bytes!("../../assets/bluetooth/bluetooth-connected.svg");
-    pub const SLASH: &[u8] = include_bytes!("../../assets/bluetooth/bluetooth-slash.svg");
-    pub const X: &[u8] = include_bytes!("../../assets/bluetooth/bluetooth-x.svg");
-}
+use assets::icons::bluetooth as svg;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BluetoothState {

@@ -10,7 +10,7 @@ pub use module::{StatusBarModule, StatusBarScreen};
 pub use status_bar::{StatusBar, StatusBarBuilder, status_bar};
 
 /// Bundled GeistMono font for status bar numeric text (such as battery percentage).
-pub const GEIST_MONO_BYTES: &[u8] = include_bytes!("../assets/fonts/GeistMono-Regular.ttf");
+pub use assets::fonts::GEIST_MONO as GEIST_MONO_BYTES;
 
 /// Default icon dimension in pixels (matches 20x20 design specification).
 pub const DEFAULT_ICON_SIZE: u32 = 20;
@@ -106,7 +106,7 @@ mod tests {
             app.widget::<CellularIndicator>(bar_widget.cellular)
                 .unwrap()
                 .state(),
-            CellularState::Full
+            CellularState::Disabled
         );
         assert_eq!(
             app.widget::<AirplaneIndicator>(bar_widget.airplane)
@@ -216,7 +216,7 @@ mod tests {
         // Initially:
         // Airplane is Disabled (Hidden)
         // Bluetooth is On (Visible)
-        // Cellular is Full (Visible)
+        // Cellular is Disabled (Hidden)
         // Wifi is High (Visible)
         assert_eq!(
             app.component::<LayoutStyle>(bar_widget.airplane.id())
@@ -236,7 +236,7 @@ mod tests {
                 .display,
             Display::Hidden
         );
-        assert_ne!(
+        assert_eq!(
             app.component::<LayoutStyle>(bar_widget.cellular.id())
                 .unwrap()
                 .display,

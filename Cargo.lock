@@ -65,6 +65,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
+name = "assets"
+version = "0.1.0"
+
+[[package]]
 name = "atlas"
 version = "0.1.0"
 source = "git+https://github.com/mecha-org/mecha-wayland?branch=dev#23d348d64f6bb68c254e16fa4d7701a7ced84c8e"
@@ -715,6 +719,7 @@ dependencies = [
 name = "quick-settings"
 version = "0.1.0"
 dependencies = [
+ "assets",
  "mecha-wayland",
  "screen",
  "services",
@@ -951,6 +956,7 @@ checksum = "d0d5d4b1981b8bbbb7aed204cae5726d683d5d6ac7e74ec54122ea28f315e7c8"
 name = "status-bar"
 version = "0.1.0"
 dependencies = [
+ "assets",
  "mecha-wayland",
  "screen",
  "services",

@@ -2,14 +2,7 @@ use mecha_wayland::prelude::*;
 
 use crate::indicators::{indicator_layout, load_svg_icon};
 
-mod svg {
-    pub const HIGH: &[u8] = include_bytes!("../../assets/wifi/wifi-high.svg");
-    pub const MEDIUM: &[u8] = include_bytes!("../../assets/wifi/wifi-medium.svg");
-    pub const LOW: &[u8] = include_bytes!("../../assets/wifi/wifi-low.svg");
-    pub const NONE: &[u8] = include_bytes!("../../assets/wifi/wifi-none.svg");
-    pub const SLASH: &[u8] = include_bytes!("../../assets/wifi/wifi-slash.svg");
-    pub const X: &[u8] = include_bytes!("../../assets/wifi/wifi-x.svg");
-}
+use assets::icons::wifi as svg;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WifiState {
