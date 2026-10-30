@@ -13,7 +13,7 @@ use super::container::{ContainerId, ContainerSpec, Entry};
 use super::gesture::{Detect, Gesture, Phase};
 use super::input::Input;
 use super::motion::{Final, INSTANT, Motion, Visual};
-use super::trigger::ExternalEvent;
+use super::trigger::{ExternalEvent, Trigger};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct ContainerState {
@@ -57,6 +57,8 @@ struct Live {
     velocity: VelocityTracker,
     axis: AxisLock,
     candidates: Vec<Candidate>,
+    /// Actions on the gesture's area that may still fire.
+    actions: Vec<usize>,
     /// Nodes whose presence a `follow` has changed during this gesture.
     moved: Vec<usize>,
 }
@@ -68,6 +70,10 @@ pub struct Stack {
     cfg: NavConfig,
     /// In z order: depth-first, declaration order, a parent before its children.
     nodes: Vec<Node>,
+    /// Triggers that fire an action rather than move a container.
+    actions: Vec<Box<dyn Trigger>>,
+    /// Actions committed since the last [`Stack::take_fired`].
+    fired: Vec<usize>,
     live: Option<Live>,
 }
 
@@ -77,6 +83,8 @@ impl Stack {
         let mut stack = Stack {
             cfg,
             nodes: Vec::new(),
+            actions: Vec::new(),
+            fired: Vec::new(),
             live: None,
         };
         let mut rows = Vec::new();
@@ -84,6 +92,18 @@ impl Stack {
             stack.add(root, None, &mut rows);
         }
         (stack, rows)
+    }
+
+    /// Adds a trigger that moves no container: when a gesture commits it,
+    /// its index is reported by [`Stack::take_fired`]. Returns that index.
+    pub fn action(&mut self, trigger: Box<dyn Trigger>) -> usize {
+        self.actions.push(trigger);
+        self.actions.len() - 1
+    }
+
+    /// The actions committed since the last call, in commit order.
+    pub fn take_fired(&mut self) -> Vec<usize> {
+        std::mem::take(&mut self.fired)
     }
 
     fn add(&mut self, spec: ContainerSpec, parent: Option<usize>, rows: &mut Vec<ScreenRow>) {
@@ -132,6 +152,9 @@ impl Stack {
                     return;
                 }
                 let candidates = self.candidates(area);
+                let actions = (0..self.actions.len())
+                    .filter(|&a| self.actions[a].area() == area)
+                    .collect();
                 let mut velocity = VelocityTracker::new(
                     self.cfg.velocity_window,
                     self.cfg.velocity_stale,
@@ -153,6 +176,7 @@ impl Stack {
                     velocity,
                     axis: AxisLock::new(self.cfg.axis_lock_px),
                     candidates,
+                    actions,
                     moved: Vec::new(),
                 });
             }
@@ -170,6 +194,9 @@ impl Stack {
                 let nodes = &mut self.nodes;
                 let cfg = &self.cfg;
                 let g = &live.gesture;
+                let triggers = &self.actions;
+                live.actions
+                    .retain(|&a| triggers[a].detect(g, Phase::Moving, cfg) != Detect::Ignore);
                 let moved = &mut live.moved;
                 live.candidates.retain(|c| {
                     let node = &mut nodes[c.node];
@@ -232,6 +259,13 @@ impl Stack {
                     }
                 }
                 self.settle(&driven, Duration::ZERO);
+                for a in live.actions {
+                    if self.actions[a].detect(&live.gesture, Phase::Released, &self.cfg)
+                        == Detect::Commit
+                    {
+                        self.fired.push(a);
+                    }
+                }
             }
             Input::Cancel => {
                 let Some(live) = self.live.take() else { return };
@@ -1036,6 +1070,63 @@ mod tests {
             t: t0 + duration,
         });
         assert_eq!(open_ones(&stack), [HOME_ID, DRAWER]);
+    }
+
+    fn corner_action(stack: &mut Stack, span: Span) -> usize {
+        stack.action(Box::new(
+            swipe(BOTTOM_EDGE, Direction::Up, Timing::Any).span(span),
+        ))
+    }
+
+    fn bottom_from(stack: &mut Stack, x: f32, duration_ms: u64, end_velocity: (f32, f32)) {
+        swipe_on(
+            stack,
+            BOTTOM_EDGE,
+            pt(x, 10.0),
+            pt(x, -110.0),
+            Duration::from_millis(duration_ms),
+            end_velocity,
+        );
+    }
+
+    #[test]
+    fn an_action_fires_on_commit_and_moves_no_container() {
+        let mut stack = tree_home_closed();
+        let left = corner_action(&mut stack, Span::LeftCorner);
+        let right = corner_action(&mut stack, Span::RightCorner);
+        bottom_from(&mut stack, 20.0, 150, (0.0, -1.5));
+        assert_eq!(stack.take_fired(), [left]);
+        assert!(stack.take_fired().is_empty(), "taking clears");
+        bottom_from(&mut stack, 580.0, 500, (0.0, 0.0));
+        assert_eq!(stack.take_fired(), [right]);
+        // The whole-edge home and running triggers still fire too; only
+        // spans keep them apart.
+        assert!(open_ones(&stack).contains(&RUNNING));
+    }
+
+    #[test]
+    fn an_action_does_not_fire_outside_its_span_or_on_a_short_swipe() {
+        let mut stack = tree();
+        corner_action(&mut stack, Span::LeftCorner);
+        quick_bottom(&mut stack);
+        assert!(stack.take_fired().is_empty());
+        swipe_on(
+            &mut stack,
+            BOTTOM_EDGE,
+            pt(20.0, 10.0),
+            pt(20.0, -30.0),
+            Duration::from_millis(150),
+            (0.0, -1.0),
+        );
+        assert!(stack.take_fired().is_empty());
+    }
+
+    #[test]
+    fn an_action_on_another_area_does_not_fire() {
+        let mut stack = tree();
+        stack.action(Box::new(swipe(TOP_EDGE, Direction::Up, Timing::Any)));
+        bottom_from(&mut stack, 300.0, 150, (0.0, -1.5));
+        assert!(stack.take_fired().is_empty());
     }
 
     #[test]

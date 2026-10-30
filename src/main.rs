@@ -1,6 +1,6 @@
 use app_drawer::AppDrawer;
 use home::Home;
-use keyboard::KeyboardModule;
+use keyboard::{KeyboardModule, show_keyboard};
 use mecha_wayland::mechanix_widgets::prelude::FontBook;
 use mecha_wayland::prelude::*;
 use nav::core::{
@@ -44,8 +44,15 @@ fn role(layer: Layer, anchor: Anchor, exclusive_zone: i32, namespace: &str) -> R
     })
 }
 
+/// A quick swipe up from the middle of the bottom edge; the corners are the
+/// keyboard's.
 fn bottom_quick() -> nav::core::Swipe {
-    swipe(BOTTOM_EDGE, Direction::Up, Timing::Quick)
+    swipe(BOTTOM_EDGE, Direction::Up, Timing::Quick).span(Span::Middle)
+}
+
+/// Any swipe up from one bottom corner, quick or held: shows the keyboard.
+fn bottom_corner(span: Span) -> nav::core::Swipe {
+    swipe(BOTTOM_EDGE, Direction::Up, Timing::Any).span(span)
 }
 
 /// A panel that pulls down from its half of the top edge and closes on an up swipe.
@@ -77,10 +84,15 @@ fn navigation(cfg: NavConfig) -> NavModule {
         )
         .initially_open();
     let running = container(RUNNING, RunningApps)
-        .open(swipe(BOTTOM_EDGE, Direction::Up, Timing::Held), INSTANT)
+        .open(
+            swipe(BOTTOM_EDGE, Direction::Up, Timing::Held).span(Span::Middle),
+            INSTANT,
+        )
         .close(bottom_quick(), INSTANT);
 
     NavModule::new(cfg)
+        .action(bottom_corner(Span::LeftCorner), show_keyboard)
+        .action(bottom_corner(Span::RightCorner), show_keyboard)
         .window(
             nav_window(
                 HOME,

@@ -72,6 +72,14 @@ pub(crate) fn on_contact(app: &mut App, c: &ContactInput) {
         nav.stack.handle(input);
     }
     apply(app);
+    let fired: Vec<_> = {
+        let mut nav = app.resource_mut::<Nav>();
+        let fired = nav.stack.take_fired();
+        fired.into_iter().map(|a| nav.actions[a].clone()).collect()
+    };
+    for f in fired {
+        f(app);
+    }
 }
 
 #[cfg(test)]
@@ -118,6 +126,37 @@ mod tests {
         app.signal(Frame(window_of(&app, crate::core::AreaId("home"))));
         app.flush();
         assert_eq!(display(&app, node_of(&app, HOME)), Display::Flex);
+    }
+
+    #[test]
+    fn a_corner_swipe_runs_its_action() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        use crate::core::{Direction, Span, Timing, swipe};
+
+        let ran = Rc::new(Cell::new(0));
+        let seen = ran.clone();
+        let m = module(false).action(
+            swipe(BOTTOM_EDGE, Direction::Up, Timing::Any).span(Span::RightCorner),
+            move |_| seen.set(seen.get() + 1),
+        );
+        let mut app = app_with(m);
+        let strip = window_of(&app, BOTTOM_EDGE);
+        app.emit(
+            Resized {
+                size: Size::new(600.0, 20.0),
+            },
+            strip,
+        );
+        app.flush();
+        for x in [300.0, 580.0] {
+            contact(&mut app, strip, ContactPhase::Pressed, x, 10.0);
+            contact(&mut app, strip, ContactPhase::Moved, x, 15.0);
+            contact(&mut app, strip, ContactPhase::Moved, x, -100.0);
+            contact(&mut app, strip, ContactPhase::Released, x, -100.0);
+        }
+        assert_eq!(ran.get(), 1, "only the corner swipe runs it");
     }
 
     #[test]

@@ -207,6 +207,11 @@ pub enum KeyAction {
     /// Arm a modifier for the next keystroke only (one-shot latch). Several
     /// modifiers can be armed at once; tapping again disarms.
     LatchModifier(Modifier),
+    /// Hide the keyboard (`action: hide_keyboard`).
+    HideKeyboard,
+    /// Flip whether the shown keyboard reserves its height, so apps shrink
+    /// above it rather than sit under it (`action: toggle_exclusive_zone`).
+    ToggleExclusiveZone,
     /// An action not wired this pass (prefs, modifiers other than Control/Alt).
     /// The key still draws and hit-tests; tapping it logs but types nothing.
     Unhandled(String),
@@ -322,6 +327,8 @@ fn types_digit(action: &KeyAction) -> bool {
         KeyAction::SetView(_)
         | KeyAction::ToggleView { .. }
         | KeyAction::LatchModifier(_)
+        | KeyAction::HideKeyboard
+        | KeyAction::ToggleExclusiveZone
         | KeyAction::Unhandled(_) => None,
     };
     text.is_some_and(|c| c.is_ascii_digit())
@@ -347,6 +354,10 @@ fn resolve_action(token: &str, button: Option<&Button>) -> KeyAction {
                     "BackSpace",
                     xkb::KEYSYM_NO_FLAGS,
                 ));
+            }
+            Some(ActionSpec::Named(a)) if a == "hide_keyboard" => return KeyAction::HideKeyboard,
+            Some(ActionSpec::Named(a)) if a == "toggle_exclusive_zone" => {
+                return KeyAction::ToggleExclusiveZone;
             }
             Some(ActionSpec::Named(a)) => return KeyAction::Unhandled(a.clone()),
             Some(ActionSpec::SetView { set_view }) => {
@@ -486,6 +497,19 @@ mod tests {
     }
 
     #[test]
+    fn keyboard_actions_resolve_by_name() {
+        let named = |n: &str| button(|b| b.action = Some(ActionSpec::Named(n.into())));
+        assert!(matches!(
+            resolve_action("hide", Some(&named("hide_keyboard"))),
+            KeyAction::HideKeyboard
+        ));
+        assert!(matches!(
+            resolve_action("zone", Some(&named("toggle_exclusive_zone"))),
+            KeyAction::ToggleExclusiveZone
+        ));
+    }
+
+    #[test]
     fn erase_action_maps_to_backspace() {
         let b = button(|b| b.action = Some(ActionSpec::Named("erase".into())));
         let want = xkb::keysym_from_name("BackSpace", xkb::KEYSYM_NO_FLAGS);
@@ -570,6 +594,25 @@ mod tests {
     }
 
     #[test]
+    fn fallback_bottom_rows_have_hide_and_zone_keys() {
+        let layout: Layout = yaml_serde::from_str(FALLBACK_LAYOUT).expect("fallback parses");
+        let keymap = Keymap::from_layout(&layout);
+        for name in ["base", "upper", "numbers", "symbols"] {
+            let view = keymap.view(name).expect("view exists");
+            assert!(
+                view.keys()
+                    .any(|k| matches!(k.action, KeyAction::HideKeyboard)),
+                "{name} has a hide key"
+            );
+            assert!(
+                view.keys()
+                    .any(|k| matches!(k.action, KeyAction::ToggleExclusiveZone)),
+                "{name} has an exclusive-zone key"
+            );
+        }
+    }
+
+    #[test]
     fn fallback_structured_actions_resolve() {
         let layout: Layout = yaml_serde::from_str(FALLBACK_LAYOUT).expect("fallback parses");
         let keymap = Keymap::from_layout(&layout);
@@ -597,9 +640,9 @@ mod tests {
             .keys()
             .filter(|k| matches!(k.action, KeyAction::EmitKeysym(_) | KeyAction::EmitText(_)))
             .count();
-        // 26 letters plus `, . space ⌫ DONE` in the Figma 4-row layout.
+        // 26 letters plus `. space ⌫ DONE`; `,` lives in the numbers view.
         assert!(
-            typeable >= 31,
+            typeable >= 30,
             "base view should have many typeable keys, got {typeable}"
         );
     }

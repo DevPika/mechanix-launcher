@@ -187,7 +187,7 @@ fn on_input_method_event(app: &mut App, event: &ZwpInputMethodV2Event) {
                 }
                 // Only an activate/deactivate moves the surface, so other
                 // `done`s (e.g. surrounding-text updates) don't undo a manual
-                // toggle from the visibility bar.
+                // show or hide.
                 (prev.active != now.active).then_some(now.active)
             }
             ZwpInputMethodV2Event::Unavailable { .. } => {

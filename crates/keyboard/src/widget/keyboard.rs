@@ -29,6 +29,8 @@ pub(crate) struct Keyboard {
     /// Every latching modifier key across all views, for armed-state repaint on
     /// latch toggle.
     pub(crate) latch_keys: Vec<(Modifier, Handle<Key>)>,
+    /// Every exclusive-zone toggle key across all views, for on-state repaint.
+    pub(crate) zone_keys: Vec<Handle<Key>>,
     /// Key corner radius, for repainting latch keys.
     pub(crate) radius: f32,
 }
@@ -83,6 +85,7 @@ impl Widget for Keyboard {
         // ── spawn all views ─────────────────────────────────────────────
         let mut views = Vec::with_capacity(b.keymap.views.len());
         let mut latch_keys = Vec::new();
+        let mut zone_keys = Vec::new();
 
         for (vi, view) in b.keymap.views.iter().enumerate() {
             let view_style = LayoutStyle::default()
@@ -119,8 +122,10 @@ impl Widget for Keyboard {
                         },
                     );
 
-                    if let KeyAction::LatchModifier(m) = key.action {
-                        latch_keys.push((m, key_handle));
+                    match key.action {
+                        KeyAction::LatchModifier(m) => latch_keys.push((m, key_handle)),
+                        KeyAction::ToggleExclusiveZone => zone_keys.push(key_handle),
+                        _ => {}
                     }
 
                     // Each key gets its own handler that dispatches its action
@@ -141,6 +146,7 @@ impl Widget for Keyboard {
             views,
             current_view: initial_view,
             latch_keys,
+            zone_keys,
             radius: style.radius,
         }
     }

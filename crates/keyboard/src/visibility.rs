@@ -1,7 +1,8 @@
 //! The keyboard surface's shown/hidden state.
 //!
-//! Driven by input-method `activate`/`deactivate` (applied at `done`) and
-//! force-toggled by the debug visibility bar; both write through
+//! Driven by input-method `activate`/`deactivate` (applied at `done`), shown
+//! by the host with [`show_keyboard`] and hidden by the hide key; all write
+//! through
 //! [`KeyboardVisibilityExt`]. A [`KeyboardVisibilityChanged`] signal is fanned
 //! out as an [`ApplyKeyboardVisibility`] event by a system, which the keyboard
 //! surface widget subscribes to.
@@ -26,19 +27,14 @@ impl Signal for KeyboardVisibilityChanged {}
 pub struct ApplyKeyboardVisibility;
 impl Event for ApplyKeyboardVisibility {}
 
-/// The single visibility setter: the input-method `done` handler and the debug
-/// bar both go through here. Implemented for `App` (systems) and `Context`
+/// The single visibility setter: the input-method `done` handler,
+/// [`show_keyboard`] and the hide key all go through here. Implemented for `App` (systems) and `Context`
 /// (widget handlers) so the same call works at every site.
 pub trait KeyboardVisibilityExt {
     /// The current visibility flag.
     fn keyboard_visible(&self) -> bool;
     /// Set the flag and signal the change (no-op if already `visible`).
     fn set_keyboard_visibility(&mut self, visible: bool);
-    /// Flip the current visibility.
-    fn toggle_keyboard_visibility(&mut self) {
-        let next = !self.keyboard_visible();
-        self.set_keyboard_visibility(next);
-    }
 }
 
 impl KeyboardVisibilityExt for App {
@@ -67,6 +63,12 @@ impl<W: Widget> KeyboardVisibilityExt for Context<'_, W> {
         self.signal(KeyboardVisibilityChanged);
         tracing::info!(visible, "keyboard visibility");
     }
+}
+
+/// Show the keyboard, e.g. from a nav corner-swipe action. Needs the
+/// [`KeyboardModule`](crate::KeyboardModule) installed.
+pub fn show_keyboard(app: &mut App) {
+    app.set_keyboard_visibility(true);
 }
 
 /// On [`KeyboardVisibilityChanged`], broadcast [`ApplyKeyboardVisibility`] to

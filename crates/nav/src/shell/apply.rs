@@ -1,6 +1,7 @@
 //! The `Nav` resource, and pushing the stack's state onto nodes and windows.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use mecha_wayland::prelude::*;
 
@@ -18,6 +19,9 @@ pub(crate) struct NavWindow {
     /// Takes no input: gets an empty input region on its first `Resized`.
     pub(crate) no_input: bool,
 }
+
+/// What a [`NavModule::action`](super::NavModule::action) runs.
+pub(crate) type Action = Rc<dyn Fn(&mut App)>;
 
 /// The nodes a container was built into.
 pub(crate) struct ContainerNodes {
@@ -42,6 +46,8 @@ pub(crate) struct Nav {
     pub(crate) pressed: Vec<u32>,
     /// When the stack was last ticked; `None` while nothing animates.
     pub(crate) last_tick: Option<std::time::Instant>,
+    /// Each stack action's callback, by action index.
+    pub(crate) actions: Vec<Action>,
 }
 impl Resource for Nav {}
 
